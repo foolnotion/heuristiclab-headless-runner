@@ -27,7 +27,7 @@ run_one() {
   "$EXE" \
     --train "$DATA/seed${seed}_noise${noise}_train.csv" \
     --test "$DATA/seed${seed}_noise${noise}_test.csv" \
-    --target y \
+    --target __target__ \
     --variant "$variant" \
     --seed "$seed" \
     --output "$jobout" \

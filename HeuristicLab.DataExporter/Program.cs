@@ -89,7 +89,7 @@ namespace HeuristicLab.DataExporter {
 
     private static void WriteCsv(string path, IRegressionProblemData pd, List<string> inputVars, string targetVar, IEnumerable<int> rows) {
       using (var w = new StreamWriter(path)) {
-        w.WriteLine(string.Join(",", inputVars) + ",y");
+        w.WriteLine(string.Join(",", inputVars) + ",__target__");
         foreach (var row in rows) {
           var vals = inputVars.Select(v => pd.Dataset.GetDoubleValue(v, row).ToString("R", CultureInfo.InvariantCulture));
           var y = pd.Dataset.GetDoubleValue(targetVar, row).ToString("R", CultureInfo.InvariantCulture);
