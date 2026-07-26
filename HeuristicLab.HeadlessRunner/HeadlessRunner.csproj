@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{B7B1B7B1-0001-4C1A-9C1A-000000000001}</ProjectGuid>
+    <OutputType>Exe</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>HeuristicLab.HeadlessRunner</RootNamespace>
+    <AssemblyName>HeuristicLab.HeadlessRunner</AssemblyName>
+    <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <Deterministic>true</Deterministic>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <LangVersion>7.3</LangVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <Prefer32Bit>false</Prefer32Bit>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Drawing" />
+
+    <Reference Include="HeuristicLab.Common-3.3">
+      <HintPath>..\bin\HeuristicLab.Common-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Common.Resources-3.3">
+      <HintPath>..\bin\HeuristicLab.Common.Resources-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Core-3.3">
+      <HintPath>..\bin\HeuristicLab.Core-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Collections-3.3">
+      <HintPath>..\bin\HeuristicLab.Collections-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Data-3.3">
+      <HintPath>..\bin\HeuristicLab.Data-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Parameters-3.3">
+      <HintPath>..\bin\HeuristicLab.Parameters-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Random-3.3">
+      <HintPath>..\bin\HeuristicLab.Random-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Operators-3.3">
+      <HintPath>..\bin\HeuristicLab.Operators-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Analysis-3.3">
+      <HintPath>..\bin\HeuristicLab.Analysis-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Optimization-3.3">
+      <HintPath>..\bin\HeuristicLab.Optimization-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Optimization.Operators-3.3">
+      <HintPath>..\bin\HeuristicLab.Optimization.Operators-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Selection-3.3">
+      <HintPath>..\bin\HeuristicLab.Selection-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Persistence-3.3">
+      <HintPath>..\bin\HeuristicLab.Persistence-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.PluginInfrastructure-3.3">
+      <HintPath>..\bin\HeuristicLab.PluginInfrastructure-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.SequentialEngine-3.3">
+      <HintPath>..\bin\HeuristicLab.SequentialEngine-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Algorithms.GeneticAlgorithm-3.3">
+      <HintPath>..\bin\HeuristicLab.Algorithms.GeneticAlgorithm-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Encodings.SymbolicExpressionTreeEncoding-3.4">
+      <HintPath>..\bin\HeuristicLab.Encodings.SymbolicExpressionTreeEncoding-3.4.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Problems.DataAnalysis-3.4">
+      <HintPath>..\bin\HeuristicLab.Problems.DataAnalysis-3.4.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Problems.Instances-3.3">
+      <HintPath>..\bin\HeuristicLab.Problems.Instances-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Problems.DataAnalysis.Symbolic-3.4">
+      <HintPath>..\bin\HeuristicLab.Problems.DataAnalysis.Symbolic-3.4.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Problems.DataAnalysis.Symbolic.Regression-3.4">
+      <HintPath>..\bin\HeuristicLab.Problems.DataAnalysis.Symbolic.Regression-3.4.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Problems.DataAnalysis.Symbolic.NativeInterpreter-0.2">
+      <HintPath>..\bin\HeuristicLab.Problems.DataAnalysis.Symbolic.NativeInterpreter-0.2.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Tracing-3.3">
+      <HintPath>..\bin\HeuristicLab.Tracing-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HEAL.Attic">
+      <HintPath>..\bin\HEAL.Attic.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="ALGLIB-3.17.0">
+      <HintPath>..\bin\ALGLIB-3.17.0.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="AutoDiff-1.0">
+      <HintPath>..\bin\AutoDiff-1.0.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Google.Protobuf">
+      <HintPath>..\bin\Google.Protobuf.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="HeuristicLab.Protobuf">
+      <HintPath>..\bin\HeuristicLab.Protobuf.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="App.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\bin\hl-native-interpreter.dll">
+      <Link>hl-native-interpreter.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+</Project>
