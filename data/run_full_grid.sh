@@ -40,17 +40,21 @@ for key in "${!PROBLEMS[@]}"; do
   "$ROOT/data/run_grid.sh" "$key" "$DATA_ROOT/$folder" "$RESULTS_ROOT/${folder}_results.csv" "$SEEDS" "$PAR"
 done
 
-# Merge all per-problem results into one combined CSV.
+# Merge all per-problem results into one combined CSV. Build under a name that
+# does NOT match the "*_results.csv" glob below (it would otherwise match its
+# own in-progress output and self-append catastrophically), then rename.
 COMBINED="$ROOT/data/results/full_results.csv"
+TMP_COMBINED="$ROOT/data/results/.combining.csv"
 first=1
-> "$COMBINED"
+> "$TMP_COMBINED"
 for f in "$RESULTS_ROOT"/*_results.csv; do
   if [ "$first" = "1" ]; then
-    cat "$f" >> "$COMBINED"
+    cat "$f" >> "$TMP_COMBINED"
     first=0
   else
-    tail -n +2 "$f" >> "$COMBINED"
+    tail -n +2 "$f" >> "$TMP_COMBINED"
   fi
 done
+mv "$TMP_COMBINED" "$COMBINED"
 
 echo "Full grid complete: $COMBINED ($(($(wc -l < "$COMBINED") - 1)) total rows)"
