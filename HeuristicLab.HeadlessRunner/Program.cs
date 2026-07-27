@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 
 using HeuristicLab.Algorithms.GeneticAlgorithm;
 using HeuristicLab.Common;
@@ -42,6 +43,7 @@ namespace HeuristicLab.HeadlessRunner {
       public string Problem = "problem";
       public string Noise = "0";
       public string ModelOutput;
+      public string FormulaOutput;
     }
 
     private static Options ParseArgs(string[] args) {
@@ -57,13 +59,14 @@ namespace HeuristicLab.HeadlessRunner {
           case "--problem": o.Problem = args[++i]; break;
           case "--noise": o.Noise = args[++i]; break;
           case "--model-output": o.ModelOutput = args[++i]; break;
+          case "--formula-output": o.FormulaOutput = args[++i]; break;
           default:
             Console.Error.WriteLine("Unknown argument: " + args[i]);
             return null;
         }
       }
       if (o.TrainCsv == null || o.TestCsv == null || o.Target == null || o.Output == null) {
-        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--problem <name>] [--noise 0|1] [--model-output <hl-file>]");
+        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--problem <name>] [--noise 0|1] [--model-output <hl-file>] [--formula-output <csv>]");
         return null;
       }
       return o;
@@ -245,6 +248,22 @@ namespace HeuristicLab.HeadlessRunner {
           sw.Elapsed.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture),
           modelLength.ToString(CultureInfo.InvariantCulture),
           modelDepth.ToString(CultureInfo.InvariantCulture)));
+      }
+
+      if (o.FormulaOutput != null) {
+        // Written directly via StreamWriter (UTF-8, no console involved) because variable names can
+        // contain non-Latin1 Unicode characters (e.g. Greek letters); routing through Console.Out and
+        // capturing stdout is lossy since Windows' redirected-console encoding is not UTF-8.
+        string formula = new InfixExpressionFormatter().Format(bestTree);
+        string escapedFormula = "\"" + formula.Replace("\"", "\"\"") + "\"";
+        bool writeFormulaHeader = !File.Exists(o.FormulaOutput);
+        using (var fw = new StreamWriter(o.FormulaOutput, append: true, Encoding.UTF8)) {
+          if (writeFormulaHeader)
+            fw.WriteLine("problem,noise,variant,seed,formula");
+          fw.WriteLine(string.Join(",",
+            o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
+            escapedFormula));
+        }
       }
 
       if (o.ModelOutput != null) {
