@@ -5,6 +5,8 @@ using System.IO;
 using System.Linq;
 
 using HeuristicLab.Algorithms.GeneticAlgorithm;
+using HeuristicLab.Common;
+using HeuristicLab.Core;
 using HeuristicLab.Data;
 using HeuristicLab.Encodings.SymbolicExpressionTreeEncoding;
 using HeuristicLab.Optimization;
@@ -39,6 +41,7 @@ namespace HeuristicLab.HeadlessRunner {
       public string Output;
       public string Problem = "problem";
       public string Noise = "0";
+      public string ModelOutput;
     }
 
     private static Options ParseArgs(string[] args) {
@@ -53,13 +56,14 @@ namespace HeuristicLab.HeadlessRunner {
           case "--output": o.Output = args[++i]; break;
           case "--problem": o.Problem = args[++i]; break;
           case "--noise": o.Noise = args[++i]; break;
+          case "--model-output": o.ModelOutput = args[++i]; break;
           default:
             Console.Error.WriteLine("Unknown argument: " + args[i]);
             return null;
         }
       }
       if (o.TrainCsv == null || o.TestCsv == null || o.Target == null || o.Output == null) {
-        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--problem <name>] [--noise 0|1]");
+        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--problem <name>] [--noise 0|1] [--model-output <hl-file>]");
         return null;
       }
       return o;
@@ -210,11 +214,13 @@ namespace HeuristicLab.HeadlessRunner {
       var bestSolution = (ISymbolicRegressionSolution)ga.Results["Best training solution"].Value;
       double trainNmse = bestSolution.TrainingNormalizedMeanSquaredError * 100.0;
       double testNmse = bestSolution.TestNormalizedMeanSquaredError * 100.0;
+      var bestTree = bestSolution.Model.SymbolicExpressionTree;
+      int modelLength = bestTree.Length;
+      int modelDepth = bestTree.Depth;
 
       if (Environment.GetEnvironmentVariable("HL_DEBUG") == "1") {
-        var tree = bestSolution.Model.SymbolicExpressionTree;
-        Console.WriteLine("Best tree infix: " + new InfixExpressionFormatter().Format(tree));
-        Console.WriteLine("Best tree length=" + tree.Length + " depth=" + tree.Depth);
+        Console.WriteLine("Best tree infix: " + new InfixExpressionFormatter().Format(bestTree));
+        Console.WriteLine("Best tree length=" + bestTree.Length + " depth=" + bestTree.Depth);
         Console.WriteLine("Best training solution quality: " + ((HeuristicLab.Data.DoubleValue)ga.Results["Best training solution quality"].Value).Value);
         Console.WriteLine("Best training solution generation: " + ga.Results["Best training solution generation"].Value);
         if (ga.Results.ContainsKey("Generations"))
@@ -230,13 +236,26 @@ namespace HeuristicLab.HeadlessRunner {
       bool writeHeader = !File.Exists(o.Output);
       using (var w = new StreamWriter(o.Output, append: true)) {
         if (writeHeader)
-          w.WriteLine("problem,noise,variant,seed,train_nmse_pct,test_nmse_pct,generations,elapsed_seconds");
+          w.WriteLine("problem,noise,variant,seed,train_nmse_pct,test_nmse_pct,generations,elapsed_seconds,model_length,model_depth");
         w.WriteLine(string.Join(",",
           o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
           trainNmse.ToString("R", CultureInfo.InvariantCulture),
           testNmse.ToString("R", CultureInfo.InvariantCulture),
           ga.MaximumGenerations.Value.ToString(CultureInfo.InvariantCulture),
-          sw.Elapsed.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture)));
+          sw.Elapsed.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture),
+          modelLength.ToString(CultureInfo.InvariantCulture),
+          modelDepth.ToString(CultureInfo.InvariantCulture)));
+      }
+
+      if (o.ModelOutput != null) {
+        // Persist the whole run (algorithm + problem + results, including the best solution) using
+        // HeuristicLab's native HEAL.Attic-based format, the same one ContentManager.Save uses for
+        // .hl/.hl.gz files opened from the GUI.
+        var dir = Path.GetDirectoryName(o.ModelOutput);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        bool compressed = o.ModelOutput.EndsWith(".gz", StringComparison.OrdinalIgnoreCase);
+        ContentManager.Initialize(new PersistenceContentManager());
+        ContentManager.Save(ga, o.ModelOutput, compressed);
       }
 
       Console.WriteLine($"{o.Problem} noise={o.Noise} {o.Variant} seed={o.Seed}: train NMSE%={trainNmse:F4} test NMSE%={testNmse:F4} ({sw.Elapsed.TotalSeconds:F1}s)");
