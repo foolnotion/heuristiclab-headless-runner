@@ -220,9 +220,13 @@ namespace HeuristicLab.HeadlessRunner {
       var bestTree = bestSolution.Model.SymbolicExpressionTree;
       int modelLength = bestTree.Length;
       int modelDepth = bestTree.Depth;
+      // Formatted once and reused for all outputs below (HL_DEBUG console line, the CSV's model
+      // column, and --formula-output) since InfixExpressionFormatter.Format is not free to call.
+      string modelFormula = new InfixExpressionFormatter().Format(bestTree);
+      string escapedModelFormula = "\"" + modelFormula.Replace("\"", "\"\"") + "\"";
 
       if (Environment.GetEnvironmentVariable("HL_DEBUG") == "1") {
-        Console.WriteLine("Best tree infix: " + new InfixExpressionFormatter().Format(bestTree));
+        Console.WriteLine("Best tree infix: " + modelFormula);
         Console.WriteLine("Best tree length=" + bestTree.Length + " depth=" + bestTree.Depth);
         Console.WriteLine("Best training solution quality: " + ((HeuristicLab.Data.DoubleValue)ga.Results["Best training solution quality"].Value).Value);
         Console.WriteLine("Best training solution generation: " + ga.Results["Best training solution generation"].Value);
@@ -239,7 +243,7 @@ namespace HeuristicLab.HeadlessRunner {
       bool writeHeader = !File.Exists(o.Output);
       using (var w = new StreamWriter(o.Output, append: true)) {
         if (writeHeader)
-          w.WriteLine("problem,noise,variant,seed,train_nmse_pct,test_nmse_pct,generations,elapsed_seconds,model_length,model_depth");
+          w.WriteLine("problem,noise,variant,seed,train_nmse_pct,test_nmse_pct,generations,elapsed_seconds,model_length,model_depth,model");
         w.WriteLine(string.Join(",",
           o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
           trainNmse.ToString("R", CultureInfo.InvariantCulture),
@@ -247,22 +251,18 @@ namespace HeuristicLab.HeadlessRunner {
           ga.MaximumGenerations.Value.ToString(CultureInfo.InvariantCulture),
           sw.Elapsed.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture),
           modelLength.ToString(CultureInfo.InvariantCulture),
-          modelDepth.ToString(CultureInfo.InvariantCulture)));
+          modelDepth.ToString(CultureInfo.InvariantCulture),
+          escapedModelFormula));
       }
 
       if (o.FormulaOutput != null) {
-        // Written directly via StreamWriter (UTF-8, no console involved) because variable names can
-        // contain non-Latin1 Unicode characters (e.g. Greek letters); routing through Console.Out and
-        // capturing stdout is lossy since Windows' redirected-console encoding is not UTF-8.
-        string formula = new InfixExpressionFormatter().Format(bestTree);
-        string escapedFormula = "\"" + formula.Replace("\"", "\"\"") + "\"";
         bool writeFormulaHeader = !File.Exists(o.FormulaOutput);
         using (var fw = new StreamWriter(o.FormulaOutput, append: true, Encoding.UTF8)) {
           if (writeFormulaHeader)
             fw.WriteLine("problem,noise,variant,seed,formula");
           fw.WriteLine(string.Join(",",
             o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
-            escapedFormula));
+            escapedModelFormula));
         }
       }
 
