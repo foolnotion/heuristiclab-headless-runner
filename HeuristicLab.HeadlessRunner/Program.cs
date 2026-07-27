@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 
 using HeuristicLab.Algorithms.GeneticAlgorithm;
+using HeuristicLab.Analysis;
 using HeuristicLab.Common;
 using HeuristicLab.Core;
 using HeuristicLab.Data;
@@ -44,6 +45,7 @@ namespace HeuristicLab.HeadlessRunner {
       public string Noise = "0";
       public string ModelOutput;
       public string FormulaOutput;
+      public string GenStatsOutput;
     }
 
     private static Options ParseArgs(string[] args) {
@@ -60,13 +62,14 @@ namespace HeuristicLab.HeadlessRunner {
           case "--noise": o.Noise = args[++i]; break;
           case "--model-output": o.ModelOutput = args[++i]; break;
           case "--formula-output": o.FormulaOutput = args[++i]; break;
+          case "--gen-stats-output": o.GenStatsOutput = args[++i]; break;
           default:
             Console.Error.WriteLine("Unknown argument: " + args[i]);
             return null;
         }
       }
       if (o.TrainCsv == null || o.TestCsv == null || o.Target == null || o.Output == null) {
-        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--problem <name>] [--noise 0|1] [--model-output <hl-file>] [--formula-output <csv>]");
+        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--problem <name>] [--noise 0|1] [--model-output <hl-file>] [--formula-output <csv>] [--gen-stats-output <csv>]");
         return null;
       }
       return o;
@@ -225,6 +228,14 @@ namespace HeuristicLab.HeadlessRunner {
       string modelFormula = new InfixExpressionFormatter().Format(bestTree);
       string escapedModelFormula = "\"" + modelFormula.Replace("\"", "\"\"") + "\"";
 
+      // Train target variance, used to convert the per-generation "Qualities" series (raw MSE, since
+      // that's what both SymbolicRegressionSingleObjectiveMeanSquaredErrorEvaluator and
+      // ParameterOptimizationEvaluator report as Quality) into NMSE% comparable to trainNmse/testNmse
+      // above and to operon's probe output.
+      var targetTrain = problemData.TargetVariableTrainingValues.ToArray();
+      var targetTrainMean = targetTrain.Average();
+      var targetTrainVariance = targetTrain.Select(v => (v - targetTrainMean) * (v - targetTrainMean)).Average();
+
       if (Environment.GetEnvironmentVariable("HL_DEBUG") == "1") {
         Console.WriteLine("Best tree infix: " + modelFormula);
         Console.WriteLine("Best tree length=" + bestTree.Length + " depth=" + bestTree.Depth);
@@ -234,10 +245,7 @@ namespace HeuristicLab.HeadlessRunner {
           Console.WriteLine("Generations executed: " + ga.Results["Generations"].Value);
         if (ga.Results.ContainsKey("Evaluated Solutions"))
           Console.WriteLine("Evaluated Solutions: " + ga.Results["Evaluated Solutions"].Value);
-        var targetTrain = problemData.TargetVariableTrainingValues.ToArray();
-        var mean = targetTrain.Average();
-        var variance = targetTrain.Select(v => (v - mean) * (v - mean)).Average();
-        Console.WriteLine($"Train target mean={mean} variance={variance}");
+        Console.WriteLine($"Train target mean={targetTrainMean} variance={targetTrainVariance}");
       }
 
       bool writeHeader = !File.Exists(o.Output);
@@ -263,6 +271,41 @@ namespace HeuristicLab.HeadlessRunner {
           fw.WriteLine(string.Join(",",
             o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
             escapedModelFormula));
+        }
+      }
+
+      if (o.GenStatsOutput != null) {
+        // Both DataTables come from analyzers that HL's GeneticAlgorithm/SymbolicDataAnalysisProblem
+        // already wire up and enable by default (BestAverageWorstQualityAnalyzer and
+        // MinAverageMaxSymbolicExpressionTreeLengthAnalyzer) -- no custom instrumentation needed, just
+        // reading Results after the run. Quality is raw MSE; converted to NMSE% via targetTrainVariance
+        // so it's comparable to trainNmse/testNmse above and to operon's probe output.
+        var qualities = (DataTable)ga.Results["Qualities"].Value;
+        var bestSeries = qualities.Rows["CurrentBestQuality"].Values;
+        var avgSeries = qualities.Rows["CurrentAverageQuality"].Values;
+        var worstSeries = qualities.Rows["CurrentWorstQuality"].Values;
+
+        var lengths = (DataTable)ga.Results["Symbolic expression tree length"].Value;
+        var minLenSeries = lengths.Rows["Minimal symbolic expression tree length"].Values;
+        var avgLenSeries = lengths.Rows["Average symbolic expression tree length"].Values;
+        var maxLenSeries = lengths.Rows["Maximal symbolic expression tree length"].Values;
+
+        int nGen = bestSeries.Count;
+        bool writeGenStatsHeader = !File.Exists(o.GenStatsOutput);
+        using (var gw = new StreamWriter(o.GenStatsOutput, append: true)) {
+          if (writeGenStatsHeader)
+            gw.WriteLine("problem,noise,variant,seed,generation,fitness_best,fitness_avg,fitness_worst,length_min,length_avg,length_max");
+          for (int g = 0; g < nGen; g++) {
+            gw.WriteLine(string.Join(",",
+              o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
+              g.ToString(CultureInfo.InvariantCulture),
+              (bestSeries[g] / targetTrainVariance * 100.0).ToString("R", CultureInfo.InvariantCulture),
+              (avgSeries[g] / targetTrainVariance * 100.0).ToString("R", CultureInfo.InvariantCulture),
+              (worstSeries[g] / targetTrainVariance * 100.0).ToString("R", CultureInfo.InvariantCulture),
+              minLenSeries[g].ToString("R", CultureInfo.InvariantCulture),
+              avgLenSeries[g].ToString("R", CultureInfo.InvariantCulture),
+              maxLenSeries[g].ToString("R", CultureInfo.InvariantCulture)));
+          }
         }
       }
 
