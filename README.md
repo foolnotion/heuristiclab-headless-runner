@@ -44,6 +44,28 @@ was that checkout's own build output directory). To build standalone:
 MSBuild.exe HeuristicLab.HeadlessRunner/HeadlessRunner.csproj -p:Configuration=Release
 ```
 
+## GPC evaluator
+
+GPC runs use `SymbolicRegressionParameterOptimizationEvaluator` (ALGLIB
+lsfit + AutoDiff Levenberg-Marquardt, `HeuristicLab.Problems.DataAnalysis.Symbolic.Regression`),
+**not** the newer `ParameterOptimizationEvaluator` (native-interpreter
+LM). This matches the paper's actual saved `.hl` files — confirmed via
+`SymbolicRegressionParameterOptimizationEvaluator`'s `AfterDeserialization`
+backward-compat shim, which renames a legacy `ConstantOptimizationIterations`
+parameter to today's `ParameterOptimizationIterations`, matching the
+`.hl` dump's actual saved parameter names exactly (also
+`Count Function and Gradient Evaluations`, same capitalization) — the
+class is marked `[Obsolete("Use ParameterOptimizationEvaluator instead")]`
+in current HL, i.e. it's the file's *older* evaluator, later superseded
+by the native one; the `.hl` files predate that switch. Its Quality
+metric is Pearson R² (maximized), not raw MSE (minimized) like the GP
+variant's evaluator — `--gen-stats-output`'s `fitness_*` columns convert
+accordingly (`NMSE% = (1 - R²) * 100`, exact given `ApplyLinearScaling=true`).
+Noticeably slower than the native evaluator (~40-50s per GPC run at
+`PopulationSize=1000`/20 generations vs. ~10-15s) since it's a managed
+ALGLIB+AutoDiff implementation rather than a native C++ one — factor
+this into batch-run time estimates.
+
 ## Runtime env overrides (HeuristicLab.HeadlessRunner)
 
 - `HL_POPSIZE` — population size (default 1000)

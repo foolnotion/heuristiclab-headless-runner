@@ -282,7 +282,17 @@ namespace HeuristicLab.HeadlessRunner {
 
       ISymbolicRegressionSingleObjectiveEvaluator evaluator;
       if (isGpc) {
-        var poe = new ParameterOptimizationEvaluator { Iterations = 10 };
+        // The paper's actual .hl files used SymbolicRegressionParameterOptimizationEvaluator
+        // (ALGLIB+AutoDiff Levenberg-Marquardt) -- confirmed via its AfterDeserialization backward-
+        // compat shim, which renames a legacy "ConstantOptimizationIterations" parameter to today's
+        // "ParameterOptimizationIterations", matching the .hl dump's actual saved parameter names
+        // exactly (also "Count Function and Gradient Evaluations", same capitalization). The newer
+        // ParameterOptimizationEvaluator (native-interpreter LM) is marked [Obsolete("Use
+        // ParameterOptimizationEvaluator instead")] on the OLD class -- i.e. it's each *older* HL
+        // build's evaluator that was later superseded by the native one; the .hl files predate that
+        // switch. Default-constructed parameters already match the .hl config (Iterations=10,
+        // Probability=1, RowsPercentage=1, UpdateVariableWeights=true) -- no explicit overrides needed.
+        var poe = new SymbolicRegressionParameterOptimizationEvaluator();
         evaluator = poe;
       } else {
         var mse = new SymbolicRegressionSingleObjectiveMeanSquaredErrorEvaluator();
@@ -291,9 +301,10 @@ namespace HeuristicLab.HeadlessRunner {
 
       // SymbolicRegressionSingleObjectiveProblem sets ApplyLinearScalingParameter = true by default in its ctor.
       // It also hardcodes Maximization = true in the ctor regardless of the evaluator passed in, which is only
-      // correct for the default (maximizing) evaluator. Our evaluators (MSE, ParameterOptimizationEvaluator)
-      // both minimize (Maximization => false), so this must be corrected explicitly or the GA actively searches
-      // for the worst possible fit.
+      // correct for the default (maximizing) evaluator. Our GP evaluator (MSE) minimizes (Maximization =>
+      // false) while our GPC evaluator (SymbolicRegressionParameterOptimizationEvaluator, Pearson R^2) maximizes
+      // (Maximization => true) -- this line reads the correct direction from whichever evaluator was
+      // selected above rather than hardcoding either, since the two variants now differ.
       var problem = new SymbolicRegressionSingleObjectiveProblem(problemData, evaluator, new SymbolicDataAnalysisExpressionTreeCreator());
       problem.Maximization.Value = evaluator.Maximization;
       // Default is SymbolicDataAnalysisExpressionTreeLinearInterpreter (plain managed tree-walking);
@@ -371,10 +382,13 @@ namespace HeuristicLab.HeadlessRunner {
       string modelFormula = new InfixExpressionFormatter().Format(bestTree);
       string escapedModelFormula = "\"" + modelFormula.Replace("\"", "\"\"") + "\"";
 
-      // Train target variance, used to convert the per-generation "Qualities" series (raw MSE, since
-      // that's what both SymbolicRegressionSingleObjectiveMeanSquaredErrorEvaluator and
-      // ParameterOptimizationEvaluator report as Quality) into NMSE% comparable to trainNmse/testNmse
-      // above and to operon's probe output.
+      // Train target variance, used to convert the per-generation "Qualities" series into NMSE%
+      // comparable to trainNmse/testNmse above and to operon's probe output. GP's evaluator
+      // (SymbolicRegressionSingleObjectiveMeanSquaredErrorEvaluator) reports raw MSE as Quality
+      // (minimized); GPC's evaluator (SymbolicRegressionParameterOptimizationEvaluator) reports
+      // Pearson R^2 as Quality (maximized) -- with ApplyLinearScaling=true (the model's own optimal
+      // affine correction already applied), R^2 = 1 - NMSE exactly, so NMSE% = (1 - R^2) * 100.
+      // ToNmsePercent below picks the right conversion from evaluator.Maximization.
       var targetTrain = problemData.TargetVariableTrainingValues.ToArray();
       var targetTrainMean = targetTrain.Average();
       var targetTrainVariance = targetTrain.Select(v => (v - targetTrainMean) * (v - targetTrainMean)).Average();
@@ -421,8 +435,12 @@ namespace HeuristicLab.HeadlessRunner {
         // Both DataTables come from analyzers that HL's GeneticAlgorithm/SymbolicDataAnalysisProblem
         // already wire up and enable by default (BestAverageWorstQualityAnalyzer and
         // MinAverageMaxSymbolicExpressionTreeLengthAnalyzer) -- no custom instrumentation needed, just
-        // reading Results after the run. Quality is raw MSE; converted to NMSE% via targetTrainVariance
-        // so it's comparable to trainNmse/testNmse above and to operon's probe output.
+        // reading Results after the run.
+        double ToNmsePercent(double quality) =>
+          evaluator.Maximization
+            ? (1.0 - quality) * 100.0   // GPC: Quality is Pearson R^2 (maximized); NMSE% = (1 - R^2) * 100
+            : quality / targetTrainVariance * 100.0; // GP: Quality is raw MSE (minimized)
+
         var qualities = (DataTable)ga.Results["Qualities"].Value;
         var bestSeries = qualities.Rows["CurrentBestQuality"].Values;
         var avgSeries = qualities.Rows["CurrentAverageQuality"].Values;
@@ -442,9 +460,9 @@ namespace HeuristicLab.HeadlessRunner {
             gw.WriteLine(string.Join(",",
               o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
               g.ToString(CultureInfo.InvariantCulture),
-              (bestSeries[g] / targetTrainVariance * 100.0).ToString("R", CultureInfo.InvariantCulture),
-              (avgSeries[g] / targetTrainVariance * 100.0).ToString("R", CultureInfo.InvariantCulture),
-              (worstSeries[g] / targetTrainVariance * 100.0).ToString("R", CultureInfo.InvariantCulture),
+              ToNmsePercent(bestSeries[g]).ToString("R", CultureInfo.InvariantCulture),
+              ToNmsePercent(avgSeries[g]).ToString("R", CultureInfo.InvariantCulture),
+              ToNmsePercent(worstSeries[g]).ToString("R", CultureInfo.InvariantCulture),
               minLenSeries[g].ToString("R", CultureInfo.InvariantCulture),
               avgLenSeries[g].ToString("R", CultureInfo.InvariantCulture),
               maxLenSeries[g].ToString("R", CultureInfo.InvariantCulture)));
