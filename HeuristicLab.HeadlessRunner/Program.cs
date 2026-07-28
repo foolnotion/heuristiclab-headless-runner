@@ -59,6 +59,7 @@ namespace HeuristicLab.HeadlessRunner {
       public string FormulaOutput;
       public string GenStatsOutput;
       public string CrossoverNoopOutput;
+      public string CrossoverKernelOutput;
     }
 
     private static Options ParseArgs(string[] args) {
@@ -77,13 +78,14 @@ namespace HeuristicLab.HeadlessRunner {
           case "--formula-output": o.FormulaOutput = args[++i]; break;
           case "--gen-stats-output": o.GenStatsOutput = args[++i]; break;
           case "--crossover-noop-output": o.CrossoverNoopOutput = args[++i]; break;
+          case "--crossover-kernel-output": o.CrossoverKernelOutput = args[++i]; break;
           default:
             Console.Error.WriteLine("Unknown argument: " + args[i]);
             return null;
         }
       }
       if (o.TrainCsv == null || o.TestCsv == null || o.Target == null || o.Output == null) {
-        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--problem <name>] [--noise 0|1] [--model-output <hl-file>] [--formula-output <csv>] [--gen-stats-output <csv>] [--crossover-noop-output <csv>]");
+        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--problem <name>] [--noise 0|1] [--model-output <hl-file>] [--formula-output <csv>] [--gen-stats-output <csv>] [--crossover-noop-output <csv>] [--crossover-kernel-output <csv>]");
         return null;
       }
       return o;
@@ -360,6 +362,10 @@ namespace HeuristicLab.HeadlessRunner {
       // this run, only when --crossover-noop-output was requested.
       if (o.CrossoverNoopOutput != null)
         SubtreeCrossover.NoOpLog = new List<Tuple<int, bool>>();
+      // Same instrumentation family: (parent0 length, removed-subtree length) for the excision side
+      // of every Cross() call, for building an empirical crossover node-selection kernel.
+      if (o.CrossoverKernelOutput != null)
+        SubtreeCrossover.KernelLog = new List<Tuple<int, int>>();
 
       // Read back from the live algorithm object right before Start() -- not the intended
       // config value -- so a silent fallback-to-default or a parse failure earlier would show up here.
@@ -493,6 +499,26 @@ namespace HeuristicLab.HeadlessRunner {
           }
         }
         Console.WriteLine($"[verify] crossover calls logged = {log.Count} (expected {callsPerGeneration} x {ga.MaximumGenerations.Value} generations = {callsPerGeneration * ga.MaximumGenerations.Value})");
+      }
+
+      if (o.CrossoverKernelOutput != null) {
+        // Same generation-inference reasoning as --crossover-noop-output above.
+        int callsPerGeneration = ga.PopulationSize.Value - ga.Elites.Value;
+        var kernelLog = SubtreeCrossover.KernelLog;
+        bool writeKernelHeader = !File.Exists(o.CrossoverKernelOutput);
+        using (var kw = new StreamWriter(o.CrossoverKernelOutput, append: true)) {
+          if (writeKernelHeader)
+            kw.WriteLine("problem,noise,variant,seed,generation,parent_length,removed_length");
+          for (int i = 0; i < kernelLog.Count; i++) {
+            int generation = i / callsPerGeneration;
+            kw.WriteLine(string.Join(",",
+              o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
+              generation.ToString(CultureInfo.InvariantCulture),
+              kernelLog[i].Item1.ToString(CultureInfo.InvariantCulture),
+              kernelLog[i].Item2.ToString(CultureInfo.InvariantCulture)));
+          }
+        }
+        Console.WriteLine($"[verify] crossover kernel events logged = {kernelLog.Count} (expected {callsPerGeneration} x {ga.MaximumGenerations.Value} generations = {callsPerGeneration * ga.MaximumGenerations.Value})");
       }
 
       if (o.ModelOutput != null) {

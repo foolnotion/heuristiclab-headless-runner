@@ -92,6 +92,17 @@ this into batch-run time estimates.
   before building if you need this option, and feel free to revert it
   afterward. Omit `--crossover-noop-output` entirely to use this harness
   against a stock, uninstrumented checkout.
+- `--crossover-kernel-output <csv>` — export one row per
+  `SubtreeCrossover.Cross()` call (`problem, noise, variant, seed,
+  generation, parent_length, removed_length`), for building an empirical
+  crossover node-selection kernel (excision-side only — parent0's total
+  length and the excised subtree's length; the donor side is filtered by
+  a per-event budget and isn't the same distribution, see the
+  operon-publications README for why). Same temporary-instrumentation
+  pattern as `--crossover-noop-output`: requires a `SubtreeCrossover.KernelLog`
+  field (`public static List<Tuple<int,int>>`, null by default) added
+  locally before building. Both `NoOpLog` and `KernelLog` can coexist —
+  add both if you need both outputs from the same run.
 
 ## PTC2 sampler mode
 
