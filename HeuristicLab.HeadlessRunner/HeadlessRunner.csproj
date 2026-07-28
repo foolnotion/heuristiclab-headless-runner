@@ -158,6 +158,7 @@
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="PlaceholderEvaluator.cs" />
+    <Compile Include="PopulationSampleAnalyzer.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

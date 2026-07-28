@@ -103,6 +103,20 @@ this into batch-run time estimates.
   columns in `--gen-stats-output` are meaningless noise in this mode;
   only the `length_*` columns are informative. No HL source patch
   needed — this one's entirely in `PlaceholderEvaluator.cs`.
+- `--population-sample-output <csv> --population-sample-generations <comma-list>`
+  — dumps `(length, quality)` for every individual in the population at
+  the given generations (e.g. `--population-sample-generations
+  500,600,700,800,900`), for measuring `correlation(length, fitness)`
+  across the full population rather than just population-level
+  best/avg/worst. Adds a new `PopulationSampleAnalyzer` (see
+  `PopulationSampleAnalyzer.cs`) to `ga.Analyzer`, using the same
+  `ScopeTreeLookupParameter` mechanism HL's own
+  `BestAverageWorstQualityAnalyzer`/`MinAverageMaxSymbolicExpressionTreeLengthAnalyzer`
+  already use to reach every individual in the population. **No HL
+  source patch needed** — entirely new code in `PopulationSampleAnalyzer.cs`,
+  unlike the crossover instrumentation below. Output:
+  `problem, noise, variant, seed, generation, length, quality` (one row
+  per sampled individual per generation).
 
 ### Instrumentation patch (`SubtreeCrossover.NoOpLog` / `.KernelLog`)
 

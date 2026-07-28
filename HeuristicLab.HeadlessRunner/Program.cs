@@ -60,6 +60,8 @@ namespace HeuristicLab.HeadlessRunner {
       public string GenStatsOutput;
       public string CrossoverNoopOutput;
       public string CrossoverKernelOutput;
+      public string PopulationSampleOutput;
+      public string PopulationSampleGenerations; // comma-separated, e.g. "500,600,700,800,900"
     }
 
     private static Options ParseArgs(string[] args) {
@@ -79,13 +81,15 @@ namespace HeuristicLab.HeadlessRunner {
           case "--gen-stats-output": o.GenStatsOutput = args[++i]; break;
           case "--crossover-noop-output": o.CrossoverNoopOutput = args[++i]; break;
           case "--crossover-kernel-output": o.CrossoverKernelOutput = args[++i]; break;
+          case "--population-sample-output": o.PopulationSampleOutput = args[++i]; break;
+          case "--population-sample-generations": o.PopulationSampleGenerations = args[++i]; break;
           default:
             Console.Error.WriteLine("Unknown argument: " + args[i]);
             return null;
         }
       }
       if (o.TrainCsv == null || o.TestCsv == null || o.Target == null || o.Output == null) {
-        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--problem <name>] [--noise 0|1] [--model-output <hl-file>] [--formula-output <csv>] [--gen-stats-output <csv>] [--crossover-noop-output <csv>] [--crossover-kernel-output <csv>]");
+        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--problem <name>] [--noise 0|1] [--model-output <hl-file>] [--formula-output <csv>] [--gen-stats-output <csv>] [--crossover-noop-output <csv>] [--crossover-kernel-output <csv>] [--population-sample-output <csv> --population-sample-generations <csv-list>]");
         return null;
       }
       return o;
@@ -361,6 +365,19 @@ namespace HeuristicLab.HeadlessRunner {
         multiMut.Operators.SetItemCheckedState(op, allowedMutators.Contains(op.GetType()));
       ga.Mutator = multiMut;
 
+      // Adds a per-individual (length, quality) population sample at configured generations,
+      // via HL's own ScopeTreeLookupParameter mechanism (the same one BestAverageWorstQualityAnalyzer/
+      // MinAverageMaxSymbolicExpressionTreeLengthAnalyzer already use to reach every individual) --
+      // no HeuristicLab source changes needed for this one, entirely in PopulationSampleAnalyzer.cs.
+      if (o.PopulationSampleOutput != null) {
+        var sampleAnalyzer = new PopulationSampleAnalyzer();
+        ga.Analyzer.Operators.Add(sampleAnalyzer);
+        ga.Analyzer.Operators.SetItemCheckedState(sampleAnalyzer, true);
+        PopulationSampleAnalyzer.TargetGenerations = new HashSet<int>(
+          (o.PopulationSampleGenerations ?? "").Split(',').Where(s => s.Length > 0).Select(int.Parse));
+        PopulationSampleAnalyzer.Log = new List<Tuple<int, int, double>>();
+      }
+
       ga.Engine = new SequentialEngine.SequentialEngine();
 
       // TEMPORARY debug instrumentation (SubtreeCrossover.NoOpLog is a local-only field on this
@@ -526,6 +543,23 @@ namespace HeuristicLab.HeadlessRunner {
           }
         }
         Console.WriteLine($"[verify] crossover kernel events logged = {kernelLog.Count} (expected {callsPerGeneration} x {ga.MaximumGenerations.Value} generations = {callsPerGeneration * ga.MaximumGenerations.Value})");
+      }
+
+      if (o.PopulationSampleOutput != null) {
+        var sampleLog = PopulationSampleAnalyzer.Log;
+        bool writeSampleHeader = !File.Exists(o.PopulationSampleOutput);
+        using (var psw = new StreamWriter(o.PopulationSampleOutput, append: true)) {
+          if (writeSampleHeader)
+            psw.WriteLine("problem,noise,variant,seed,generation,length,quality");
+          foreach (var row in sampleLog) {
+            psw.WriteLine(string.Join(",",
+              o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
+              row.Item1.ToString(CultureInfo.InvariantCulture),
+              row.Item2.ToString(CultureInfo.InvariantCulture),
+              row.Item3.ToString("R", CultureInfo.InvariantCulture)));
+          }
+        }
+        Console.WriteLine($"[verify] population samples logged = {sampleLog.Count} across {PopulationSampleAnalyzer.TargetGenerations.Count} target generations (expect {ga.PopulationSize.Value} individuals x {PopulationSampleAnalyzer.TargetGenerations.Count} generations = {ga.PopulationSize.Value * PopulationSampleAnalyzer.TargetGenerations.Count}, if all target generations were reached)");
       }
 
       if (o.ModelOutput != null) {
