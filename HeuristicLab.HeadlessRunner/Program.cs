@@ -405,6 +405,7 @@ namespace HeuristicLab.HeadlessRunner {
         PurgeDegenerateAnalyzer.UpperEstimationLimit = problem.EstimationLimits.Upper;
         PurgeDegenerateAnalyzer.PurgeCount = 0;
         PurgeDegenerateAnalyzer.FellBackToStillDegenerateCount = 0;
+        PurgeDegenerateAnalyzer.NoSurvivorFallbackCount = 0;
       }
 
       ga.Engine = new SequentialEngine.SequentialEngine();
@@ -603,7 +604,7 @@ namespace HeuristicLab.HeadlessRunner {
       }
 
       if (PurgeDegenerateAnalyzer.Enabled)
-        Console.WriteLine($"[verify] degenerate purges = {PurgeDegenerateAnalyzer.PurgeCount} (fell back to still-degenerate replacement {PurgeDegenerateAnalyzer.FellBackToStillDegenerateCount} times; Apply() called {PurgeDegenerateAnalyzer.ApplyCallCount} times, saw {PurgeDegenerateAnalyzer.IndividualsSeenCount} individual-slots total)");
+        Console.WriteLine($"[verify] degenerate purges = {PurgeDegenerateAnalyzer.PurgeCount} (parent-swap replacement; no-survivor PTC2 fallback {PurgeDegenerateAnalyzer.NoSurvivorFallbackCount} times, of which still-degenerate after fallback {PurgeDegenerateAnalyzer.FellBackToStillDegenerateCount} times; Apply() called {PurgeDegenerateAnalyzer.ApplyCallCount} times, saw {PurgeDegenerateAnalyzer.IndividualsSeenCount} individual-slots total)");
 
       Console.WriteLine($"{o.Problem} noise={o.Noise} {o.Variant} seed={o.Seed}: train NMSE%={trainNmse:F4} test NMSE%={testNmse:F4} ({sw.Elapsed.TotalSeconds:F1}s)");
     }
