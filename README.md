@@ -56,6 +56,20 @@ MSBuild.exe HeuristicLab.HeadlessRunner/HeadlessRunner.csproj -p:Configuration=R
 - `HL_INTERPRETER=default` — use the managed linear tree interpreter
   instead of the native one
 - `HL_DEBUG=1` — verbose console diagnostics
+- `--crossover-noop-output <csv>` — export one row per `SubtreeCrossover.Cross()`
+  call (`problem, noise, variant, seed, generation, parent0_length,
+  is_noop`), for measuring how often crossover silently returns parent0
+  unchanged (no donor branch fit the size budget). **Requires a
+  temporary, not-upstreamed instrumentation field**:
+  `SubtreeCrossover.NoOpLog` (a `public static List<Tuple<int,bool>>`,
+  null by default so it's zero-cost when unused) must exist on the
+  `heal-research/HeuristicLab` checkout this repo builds against — it is
+  intentionally **not** committed there (nothing gets committed to
+  `heal-research/HeuristicLab` from this project); add it locally to
+  `HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs`
+  before building if you need this option, and feel free to revert it
+  afterward. Omit `--crossover-noop-output` entirely to use this harness
+  against a stock, uninstrumented checkout.
 
 ## PTC2 sampler mode
 

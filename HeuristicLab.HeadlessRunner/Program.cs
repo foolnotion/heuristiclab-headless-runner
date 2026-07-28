@@ -58,6 +58,7 @@ namespace HeuristicLab.HeadlessRunner {
       public string ModelOutput;
       public string FormulaOutput;
       public string GenStatsOutput;
+      public string CrossoverNoopOutput;
     }
 
     private static Options ParseArgs(string[] args) {
@@ -75,13 +76,14 @@ namespace HeuristicLab.HeadlessRunner {
           case "--model-output": o.ModelOutput = args[++i]; break;
           case "--formula-output": o.FormulaOutput = args[++i]; break;
           case "--gen-stats-output": o.GenStatsOutput = args[++i]; break;
+          case "--crossover-noop-output": o.CrossoverNoopOutput = args[++i]; break;
           default:
             Console.Error.WriteLine("Unknown argument: " + args[i]);
             return null;
         }
       }
       if (o.TrainCsv == null || o.TestCsv == null || o.Target == null || o.Output == null) {
-        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--problem <name>] [--noise 0|1] [--model-output <hl-file>] [--formula-output <csv>] [--gen-stats-output <csv>]");
+        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--problem <name>] [--noise 0|1] [--model-output <hl-file>] [--formula-output <csv>] [--gen-stats-output <csv>] [--crossover-noop-output <csv>]");
         return null;
       }
       return o;
@@ -341,6 +343,13 @@ namespace HeuristicLab.HeadlessRunner {
 
       ga.Engine = new SequentialEngine.SequentialEngine();
 
+      // TEMPORARY debug instrumentation (SubtreeCrossover.NoOpLog is a local-only field on this
+      // checkout's HeuristicLab.Encodings.SymbolicExpressionTreeEncoding build, not committed to
+      // heal-research/HeuristicLab): captures (parent0 length, is-noop) for every Cross() call
+      // this run, only when --crossover-noop-output was requested.
+      if (o.CrossoverNoopOutput != null)
+        SubtreeCrossover.NoOpLog = new List<Tuple<int, bool>>();
+
       // Read back from the live algorithm object right before Start() -- not the intended
       // config value -- so a silent fallback-to-default or a parse failure earlier would show up here.
       Console.WriteLine($"[verify] ga.MutationProbability.Value (read from algorithm object) = {ga.MutationProbability.Value.ToString(CultureInfo.InvariantCulture)}");
@@ -441,6 +450,30 @@ namespace HeuristicLab.HeadlessRunner {
               maxLenSeries[g].ToString("R", CultureInfo.InvariantCulture)));
           }
         }
+      }
+
+      if (o.CrossoverNoopOutput != null) {
+        // Generation is inferred from call index, not tracked live: with CrossoverProbability=1.0
+        // (never skipped) and the plain GeneticAlgorithm's fixed offspring count of
+        // PopulationSize-Elites children per generation (GeneticAlgorithm.cs: selector selects
+        // 2*(PopulationSize-Elites) parents, ChildrenCreator pairs them 1:1 into children, each
+        // gets exactly one Cross() call), calls per generation is constant and known ahead of time.
+        int callsPerGeneration = ga.PopulationSize.Value - ga.Elites.Value;
+        var log = SubtreeCrossover.NoOpLog;
+        bool writeNoopHeader = !File.Exists(o.CrossoverNoopOutput);
+        using (var nw = new StreamWriter(o.CrossoverNoopOutput, append: true)) {
+          if (writeNoopHeader)
+            nw.WriteLine("problem,noise,variant,seed,generation,parent0_length,is_noop");
+          for (int i = 0; i < log.Count; i++) {
+            int generation = i / callsPerGeneration;
+            nw.WriteLine(string.Join(",",
+              o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
+              generation.ToString(CultureInfo.InvariantCulture),
+              log[i].Item1.ToString(CultureInfo.InvariantCulture),
+              log[i].Item2 ? "1" : "0"));
+          }
+        }
+        Console.WriteLine($"[verify] crossover calls logged = {log.Count} (expected {callsPerGeneration} x {ga.MaximumGenerations.Value} generations = {callsPerGeneration * ga.MaximumGenerations.Value})");
       }
 
       if (o.ModelOutput != null) {
