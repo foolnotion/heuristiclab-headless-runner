@@ -190,11 +190,19 @@ namespace HeuristicLab.HeadlessRunner {
       ga.PopulationSize.Value = Environment.GetEnvironmentVariable("HL_POPSIZE") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_POPSIZE")) : 1000;
       ga.MaximumGenerations.Value = Environment.GetEnvironmentVariable("HL_GENS") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_GENS")) : (isGpc ? 20 : 200);
       ga.Elites.Value = 1;
-      ga.MutationProbability.Value = 0.15;
+      ga.MutationProbability.Value = Environment.GetEnvironmentVariable("HL_MUTATION_PROB") != null ? double.Parse(Environment.GetEnvironmentVariable("HL_MUTATION_PROB"), CultureInfo.InvariantCulture) : 0.15;
 
-      var tournament = ga.SelectorParameter.ValidValues.OfType<TournamentSelector>().First();
-      tournament.GroupSizeParameter.Value = new IntValue(5);
-      ga.Selector = tournament;
+      // HL_SELECTOR=random swaps in RandomSelector (uniform, fitness-independent parent choice)
+      // in place of the default TournamentSelector(GroupSize=5); anything else (including unset)
+      // keeps the default.
+      if (Environment.GetEnvironmentVariable("HL_SELECTOR") == "random") {
+        var random = ga.SelectorParameter.ValidValues.OfType<RandomSelector>().First();
+        ga.Selector = random;
+      } else {
+        var tournament = ga.SelectorParameter.ValidValues.OfType<TournamentSelector>().First();
+        tournament.GroupSizeParameter.Value = new IntValue(5);
+        ga.Selector = tournament;
+      }
 
       var subtreeCx = ga.CrossoverParameter.ValidValues.OfType<SubtreeCrossover>().First();
       ga.Crossover = subtreeCx;
@@ -205,12 +213,18 @@ namespace HeuristicLab.HeadlessRunner {
         typeof(FullTreeShaker),
         typeof(OnePointShaker),
         typeof(ChangeNodeTypeManipulation),
+        typeof(RemoveBranchManipulation),
       };
       foreach (var op in multiMut.Operators.ToList())
         multiMut.Operators.SetItemCheckedState(op, allowedMutators.Contains(op.GetType()));
       ga.Mutator = multiMut;
 
       ga.Engine = new SequentialEngine.SequentialEngine();
+
+      // Read back from the live algorithm object right before Start() -- not the intended
+      // config value -- so a silent fallback-to-default or a parse failure earlier would show up here.
+      Console.WriteLine($"[verify] ga.MutationProbability.Value (read from algorithm object) = {ga.MutationProbability.Value.ToString(CultureInfo.InvariantCulture)}");
+      Console.WriteLine($"[verify] ga.Selector (read from algorithm object) = {ga.Selector.GetType().Name}");
 
       var sw = System.Diagnostics.Stopwatch.StartNew();
       ga.Prepare();
