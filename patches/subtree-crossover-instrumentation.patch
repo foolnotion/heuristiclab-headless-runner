@@ -1,0 +1,44 @@
+diff --git a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs
+index a7d316e88..c17715e62 100644
+--- a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs
++++ b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs
+@@ -107,17 +107,26 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+         MaximumSymbolicExpressionTreeLength.Value, MaximumSymbolicExpressionTreeDepth.Value);
+     }
+ 
++    // TEMPORARY debug instrumentation (not committed to heal-research/HeuristicLab) -- see
++    // heuristiclab-headless-runner README for how to re-add this when --crossover-noop-output or
++    // --crossover-kernel-output is used. KernelLog: (parent0.Length, removed-subtree length) for the
++    // excision side of every Cross() call, for building an empirical node-selection kernel.
++    public static List<Tuple<int, bool>> NoOpLog = null;
++    public static List<Tuple<int, int>> KernelLog = null;
++
+     public static ISymbolicExpressionTree Cross(IRandom random,
+       ISymbolicExpressionTree parent0, ISymbolicExpressionTree parent1,
+       double probability,
+       double internalCrossoverPointProbability, int maxTreeLength, int maxTreeDepth) {
+       if ((probability < 1) && (random.NextDouble() >= probability)) return parent0;
+-      // select a random crossover point in the first parent 
++      int parent0LengthBefore = parent0.Length;
++      // select a random crossover point in the first parent
+       CutPoint crossoverPoint0;
+       SelectCrossoverPoint(random, parent0, internalCrossoverPointProbability, maxTreeLength, maxTreeDepth, out crossoverPoint0);
+ 
+       int childLength = crossoverPoint0.Child != null ? crossoverPoint0.Child.GetLength() : 0;
+-      // calculate the max length and depth that the inserted branch can have 
++      if (KernelLog != null) KernelLog.Add(Tuple.Create(parent0LengthBefore, childLength));
++      // calculate the max length and depth that the inserted branch can have
+       int maxInsertedBranchLength = Math.Max(0, maxTreeLength - (parent0.Length - childLength));
+       int maxInsertedBranchDepth = Math.Max(0, maxTreeDepth - parent0.Root.GetBranchLevel(crossoverPoint0.Parent));
+ 
+@@ -131,8 +140,10 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+       if (crossoverPoint0.IsMatchingPointType(null)) allowedBranches.Add(null);
+ 
+       if (allowedBranches.Count == 0) {
++        if (NoOpLog != null) NoOpLog.Add(Tuple.Create(parent0LengthBefore, true));
+         return parent0;
+       } else {
++        if (NoOpLog != null) NoOpLog.Add(Tuple.Create(parent0LengthBefore, false));
+         var selectedBranch = SelectRandomBranch(random, allowedBranches, internalCrossoverPointProbability);
+         if (selectedBranch != null)
+           selectedBranch = (ISymbolicExpressionTreeNode)selectedBranch.Clone();

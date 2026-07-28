@@ -81,28 +81,54 @@ this into batch-run time estimates.
 - `--crossover-noop-output <csv>` — export one row per `SubtreeCrossover.Cross()`
   call (`problem, noise, variant, seed, generation, parent0_length,
   is_noop`), for measuring how often crossover silently returns parent0
-  unchanged (no donor branch fit the size budget). **Requires a
-  temporary, not-upstreamed instrumentation field**:
-  `SubtreeCrossover.NoOpLog` (a `public static List<Tuple<int,bool>>`,
-  null by default so it's zero-cost when unused) must exist on the
-  `heal-research/HeuristicLab` checkout this repo builds against — it is
-  intentionally **not** committed there (nothing gets committed to
-  `heal-research/HeuristicLab` from this project); add it locally to
-  `HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs`
-  before building if you need this option, and feel free to revert it
-  afterward. Omit `--crossover-noop-output` entirely to use this harness
-  against a stock, uninstrumented checkout.
+  unchanged (no donor branch fit the size budget). **Requires the
+  instrumentation patch** — see `patches/` below.
 - `--crossover-kernel-output <csv>` — export one row per
   `SubtreeCrossover.Cross()` call (`problem, noise, variant, seed,
   generation, parent_length, removed_length`), for building an empirical
   crossover node-selection kernel (excision-side only — parent0's total
   length and the excised subtree's length; the donor side is filtered by
   a per-event budget and isn't the same distribution, see the
-  operon-publications README for why). Same temporary-instrumentation
-  pattern as `--crossover-noop-output`: requires a `SubtreeCrossover.KernelLog`
-  field (`public static List<Tuple<int,int>>`, null by default) added
-  locally before building. Both `NoOpLog` and `KernelLog` can coexist —
-  add both if you need both outputs from the same run.
+  operon-publications README for why). **Requires the instrumentation
+  patch** — see `patches/` below.
+- `HL_EVAL_FREE=1` — swap in `PlaceholderEvaluator` (see
+  `PlaceholderEvaluator.cs`) instead of the real GP/GPC evaluator: skips
+  the LM constant-optimization / real fitness computation entirely,
+  assigning cheap uniform-random Quality instead, so `Elites=1` can still
+  break ties without a stable-sort artifact. Isolates crossover/
+  reinsertion structural dynamics from fitness-driven dynamics at a
+  fraction of the per-generation cost (~15-20x faster than the real GPC
+  evaluator) — useful for many-seed equilibrium-variance studies where
+  the real LM cost makes that many full runs impractical. `fitness_*`
+  columns in `--gen-stats-output` are meaningless noise in this mode;
+  only the `length_*` columns are informative. No HL source patch
+  needed — this one's entirely in `PlaceholderEvaluator.cs`.
+
+### Instrumentation patch (`SubtreeCrossover.NoOpLog` / `.KernelLog`)
+
+`--crossover-noop-output` and `--crossover-kernel-output` need two
+fields on `SubtreeCrossover` (`public static List<Tuple<int,bool>>
+NoOpLog` and `public static List<Tuple<int,int>> KernelLog`, both null
+by default so they're zero-cost when unused) that aren't upstreamed —
+nothing gets committed to `heal-research/HeuristicLab` from this
+project. Rather than hand-editing `SubtreeCrossover.cs` from memory each
+time, apply/revert it as a scripted patch:
+
+```
+patches/apply-instrumentation.sh [path-to-HeuristicLab-checkout]   # defaults to ../HeuristicLab
+patches/revert-instrumentation.sh [path-to-HeuristicLab-checkout]
+```
+
+Both scripts apply/revert `patches/subtree-crossover-instrumentation.patch`
+against the target checkout and rebuild
+`HeuristicLab.Encodings.SymbolicExpressionTreeEncoding` in place. Always
+run `revert-instrumentation.sh` once you're done capturing
+`--crossover-noop-output`/`--crossover-kernel-output` data — the checkout
+should go back to a clean, uninstrumented `git status` before doing
+anything else with it. If the patch no longer applies cleanly (upstream
+`SubtreeCrossover.cs` changed), re-derive it: make the same edit by hand
+once, `git diff` it, and overwrite `patches/subtree-crossover-instrumentation.patch`
+with the new diff.
 
 ## PTC2 sampler mode
 

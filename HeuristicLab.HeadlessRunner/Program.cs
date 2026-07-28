@@ -282,8 +282,15 @@ namespace HeuristicLab.HeadlessRunner {
 
       bool isGpc = string.Equals(o.Variant, "GPC", StringComparison.OrdinalIgnoreCase);
 
+      bool evalFree = Environment.GetEnvironmentVariable("HL_EVAL_FREE") == "1";
+
       ISymbolicRegressionSingleObjectiveEvaluator evaluator;
-      if (isGpc) {
+      if (evalFree) {
+        // Skips the real evaluation/LM step entirely -- Quality becomes cheap uniform-random
+        // noise, for isolating crossover/reinsertion structural dynamics from fitness-driven
+        // dynamics at a fraction of the per-generation cost. See PlaceholderEvaluator.cs.
+        evaluator = new PlaceholderEvaluator();
+      } else if (isGpc) {
         // The paper's actual .hl files used SymbolicRegressionParameterOptimizationEvaluator
         // (ALGLIB+AutoDiff Levenberg-Marquardt) -- confirmed via its AfterDeserialization backward-
         // compat shim, which renames a legacy "ConstantOptimizationIterations" parameter to today's
