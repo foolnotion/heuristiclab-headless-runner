@@ -155,6 +155,24 @@ namespace HeuristicLab.HeadlessRunner {
       grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.CubeRoot).Enabled = false;
 
       grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Constant).Enabled = true;
+
+      // HL_GRAMMAR=addmul: minimal NaN-safe grammar restricted to Addition/Multiplication only
+      // (plus Variable/Constant terminals), for testing whether the degenerate-fitness length
+      // skew is specific to domain-violating functions (div/log/sqrt, which can all produce
+      // NaN/undefined results) or a more general property of overparameterized local search.
+      // Disables every function symbol this method otherwise enables (including the ones
+      // ConfigureAsDefaultRegressionGrammar() itself leaves on -- Division, Exponential,
+      // Logarithm -- not just the ones added above), leaving only Addition and Multiplication
+      // reachable.
+      if (Environment.GetEnvironmentVariable("HL_GRAMMAR") == "addmul") {
+        grammar.Symbols.First(s => s.Name == TypeCoherentExpressionGrammar.TrigonometricFunctionsName).Enabled = false;
+        grammar.Symbols.First(s => s.Name == TypeCoherentExpressionGrammar.PowerFunctionsName).Enabled = false;
+        grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Division).Enabled = false;
+        grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Exponential).Enabled = false;
+        grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Logarithm).Enabled = false;
+        grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Square).Enabled = false;
+        grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.SquareRoot).Enabled = false;
+      }
       return grammar;
     }
 

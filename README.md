@@ -156,6 +156,21 @@ this into batch-run time estimates.
   operator like this, use the static helper (or explicitly set
   `RandomParameter.ExecutionContext` first) — don't call the instance
   `Evaluate()` overload directly from outside the operator graph.
+- `HL_GRAMMAR=addmul` — restricts `BuildGrammar()`'s grammar to just
+  `Addition`/`Multiplication` (plus `Variable`/`Constant`/`Number`
+  terminals): disables the Trigonometric Functions and Power Functions
+  symbol groups (group-level `Enabled=false` alone suffices regardless
+  of the individual member symbols' own flags — see the two-level
+  wiring note above `BuildGrammar()`) plus `Division`, `Exponential`,
+  and `Logarithm` individually. A purely linear/polynomial grammar where
+  nothing can ever produce NaN/undefined results, for isolating whether
+  a length-dependent degenerate-fitness effect is specific to
+  domain-violating functions (`div`/`log`/`sqrt`) or more fundamental to
+  overparameterized local search in general. Verify the restriction
+  actually took effect with `--mode ptc2sample --symbols-output <csv>`
+  before trusting a real run — sampled trees should contain only
+  `Addition`/`Multiplication`/`Constant`/`Number`/`Variable` plus the
+  `ProgramRootSymbol`/`StartSymbol` wrapper nodes, nothing else.
 
 ### Instrumentation patch (`SubtreeCrossover.NoOpLog` / `.KernelLog`)
 
