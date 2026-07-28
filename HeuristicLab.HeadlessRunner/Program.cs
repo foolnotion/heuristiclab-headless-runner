@@ -384,6 +384,29 @@ namespace HeuristicLab.HeadlessRunner {
         PopulationSampleAnalyzer.Log = new List<Tuple<int, int, double>>();
       }
 
+      // Intervention B: purges Quality<=0 (degenerate) individuals every generation, replacing
+      // each with a freshly PTC2-created individual (re-evaluated with this run's real
+      // evaluator, retried up to MaxRetries times if the replacement is itself degenerate) --
+      // testing the retention side of the degenerate-mass-inflation finding directly, independent
+      // of Intervention A's (refuted) LM-budget-scaling theory. No HL source changes needed.
+      if (Environment.GetEnvironmentVariable("HL_PURGE_DEGENERATE") == "1") {
+        var purgeAnalyzer = new PurgeDegenerateAnalyzer();
+        ga.Analyzer.Operators.Add(purgeAnalyzer);
+        ga.Analyzer.Operators.SetItemCheckedState(purgeAnalyzer, true);
+        PurgeDegenerateAnalyzer.Enabled = true;
+        PurgeDegenerateAnalyzer.Random = new MersenneTwister((uint)o.Seed);
+        PurgeDegenerateAnalyzer.Grammar = grammar;
+        PurgeDegenerateAnalyzer.MaxLength = problem.MaximumSymbolicExpressionTreeLength.Value;
+        PurgeDegenerateAnalyzer.MaxDepth = problem.MaximumSymbolicExpressionTreeDepth.Value;
+        PurgeDegenerateAnalyzer.ProblemData = problemData;
+        PurgeDegenerateAnalyzer.Interpreter = problem.SymbolicExpressionTreeInterpreter;
+        PurgeDegenerateAnalyzer.ApplyLinearScaling = problem.ApplyLinearScalingParameter.Value.Value;
+        PurgeDegenerateAnalyzer.LowerEstimationLimit = problem.EstimationLimits.Lower;
+        PurgeDegenerateAnalyzer.UpperEstimationLimit = problem.EstimationLimits.Upper;
+        PurgeDegenerateAnalyzer.PurgeCount = 0;
+        PurgeDegenerateAnalyzer.FellBackToStillDegenerateCount = 0;
+      }
+
       ga.Engine = new SequentialEngine.SequentialEngine();
 
       // TEMPORARY debug instrumentation (SubtreeCrossover.NoOpLog is a local-only field on this
@@ -578,6 +601,9 @@ namespace HeuristicLab.HeadlessRunner {
         ContentManager.Initialize(new PersistenceContentManager());
         ContentManager.Save(ga, o.ModelOutput, compressed);
       }
+
+      if (PurgeDegenerateAnalyzer.Enabled)
+        Console.WriteLine($"[verify] degenerate purges = {PurgeDegenerateAnalyzer.PurgeCount} (fell back to still-degenerate replacement {PurgeDegenerateAnalyzer.FellBackToStillDegenerateCount} times; Apply() called {PurgeDegenerateAnalyzer.ApplyCallCount} times, saw {PurgeDegenerateAnalyzer.IndividualsSeenCount} individual-slots total)");
 
       Console.WriteLine($"{o.Problem} noise={o.Noise} {o.Variant} seed={o.Seed}: train NMSE%={trainNmse:F4} test NMSE%={testNmse:F4} ({sw.Elapsed.TotalSeconds:F1}s)");
     }

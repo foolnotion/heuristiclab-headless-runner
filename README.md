@@ -132,6 +132,30 @@ this into batch-run time estimates.
   optimization to the real static helper, so there's no risk of the LM
   logic itself drifting from the real evaluator. No HL source patch
   needed for this one either.
+- `HL_PURGE_DEGENERATE=1` — swap in `PurgeDegenerateAnalyzer` (see
+  `PurgeDegenerateAnalyzer.cs`), added to `ga.Analyzer`: every
+  generation, replaces any individual with `Quality<=0` with a freshly
+  PTC2-created individual (optimized via the real
+  `SymbolicRegressionParameterOptimizationEvaluator.OptimizeParameters`
+  static helper, retried up to `MaxRetries=20` times if the replacement
+  is itself degenerate), for testing whether purging degenerate
+  individuals before they can persist collapses the population-length
+  equilibrium. No HL source patch needed — uses the same
+  `ScopeTreeLookupParameter` mechanism as `PopulationSampleAnalyzer`,
+  mutating `ISymbolicExpressionTree.Root`/`DoubleValue.Value` in place
+  (both settable, no scope-tree surgery needed). **Important**: call the
+  evaluator's static `OptimizeParameters` helper directly, not the
+  evaluator instance's own `Evaluate(tree, problemData, rows,
+  interpreter, ...)` method — that overload reads `RandomParameter.ActualValue`
+  with no null guard, which is `null` (and throws) when called as a bare
+  method outside the normal operator-graph execution context. That
+  exception gets silently swallowed somewhere in HL's engine/analyzer
+  machinery rather than surfacing as an error — the symptom is a
+  "successful"-looking run with `Generations executed: 0` regardless of
+  `HL_GENS`, no error printed at all. If you add a new evaluator-calling
+  operator like this, use the static helper (or explicitly set
+  `RandomParameter.ExecutionContext` first) — don't call the instance
+  `Evaluate()` overload directly from outside the operator graph.
 
 ### Instrumentation patch (`SubtreeCrossover.NoOpLog` / `.KernelLog`)
 
