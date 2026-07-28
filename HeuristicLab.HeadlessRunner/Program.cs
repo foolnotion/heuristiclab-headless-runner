@@ -60,6 +60,7 @@ namespace HeuristicLab.HeadlessRunner {
       public string GenStatsOutput;
       public string CrossoverNoopOutput;
       public string CrossoverKernelOutput;
+      public string CrossoverDonorOutput;
       public string PopulationSampleOutput;
       public string PopulationSampleGenerations; // comma-separated, e.g. "500,600,700,800,900"
     }
@@ -81,6 +82,7 @@ namespace HeuristicLab.HeadlessRunner {
           case "--gen-stats-output": o.GenStatsOutput = args[++i]; break;
           case "--crossover-noop-output": o.CrossoverNoopOutput = args[++i]; break;
           case "--crossover-kernel-output": o.CrossoverKernelOutput = args[++i]; break;
+          case "--crossover-donor-output": o.CrossoverDonorOutput = args[++i]; break;
           case "--population-sample-output": o.PopulationSampleOutput = args[++i]; break;
           case "--population-sample-generations": o.PopulationSampleGenerations = args[++i]; break;
           default:
@@ -89,7 +91,7 @@ namespace HeuristicLab.HeadlessRunner {
         }
       }
       if (o.TrainCsv == null || o.TestCsv == null || o.Target == null || o.Output == null) {
-        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--problem <name>] [--noise 0|1] [--model-output <hl-file>] [--formula-output <csv>] [--gen-stats-output <csv>] [--crossover-noop-output <csv>] [--crossover-kernel-output <csv>] [--population-sample-output <csv> --population-sample-generations <csv-list>]");
+        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--problem <name>] [--noise 0|1] [--model-output <hl-file>] [--formula-output <csv>] [--gen-stats-output <csv>] [--crossover-noop-output <csv>] [--crossover-kernel-output <csv>] [--crossover-donor-output <csv>] [--population-sample-output <csv> --population-sample-generations <csv-list>]");
         return null;
       }
       return o;
@@ -438,6 +440,11 @@ namespace HeuristicLab.HeadlessRunner {
       // of every Cross() call, for building an empirical crossover node-selection kernel.
       if (o.CrossoverKernelOutput != null)
         SubtreeCrossover.KernelLog = new List<Tuple<int, int>>();
+      // Same instrumentation family: (parent1/donor length, inserted-branch length) for the donor
+      // side of every Cross() call, (-1,-1) for no-op calls -- for the donor-side kernel-symmetry
+      // check (does donor tree size correlate with the excised donor branch size).
+      if (o.CrossoverDonorOutput != null)
+        SubtreeCrossover.DonorLog = new List<Tuple<int, int>>();
 
       // Read back from the live algorithm object right before Start() -- not the intended
       // config value -- so a silent fallback-to-default or a parse failure earlier would show up here.
@@ -591,6 +598,31 @@ namespace HeuristicLab.HeadlessRunner {
           }
         }
         Console.WriteLine($"[verify] crossover kernel events logged = {kernelLog.Count} (expected {callsPerGeneration} x {ga.MaximumGenerations.Value} generations = {callsPerGeneration * ga.MaximumGenerations.Value})");
+      }
+
+      if (o.CrossoverDonorOutput != null) {
+        // Same generation-inference reasoning as --crossover-noop-output above. Row index i still
+        // lines up 1:1 with call index (DonorLog logs a (-1,-1) sentinel for no-op calls rather
+        // than skipping them), so generation math is unaffected -- only the (-1,-1) rows themselves
+        // are skipped when writing, since there's no real donor-branch event to report for them.
+        int callsPerGeneration = ga.PopulationSize.Value - ga.Elites.Value;
+        var donorLog = SubtreeCrossover.DonorLog;
+        bool writeDonorHeader = !File.Exists(o.CrossoverDonorOutput);
+        int noopSkipped = 0;
+        using (var dw = new StreamWriter(o.CrossoverDonorOutput, append: true)) {
+          if (writeDonorHeader)
+            dw.WriteLine("problem,noise,variant,seed,generation,donor_length,inserted_length");
+          for (int i = 0; i < donorLog.Count; i++) {
+            if (donorLog[i].Item1 < 0) { noopSkipped++; continue; }
+            int generation = i / callsPerGeneration;
+            dw.WriteLine(string.Join(",",
+              o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
+              generation.ToString(CultureInfo.InvariantCulture),
+              donorLog[i].Item1.ToString(CultureInfo.InvariantCulture),
+              donorLog[i].Item2.ToString(CultureInfo.InvariantCulture)));
+          }
+        }
+        Console.WriteLine($"[verify] crossover donor events logged = {donorLog.Count - noopSkipped} (of {donorLog.Count} total calls, {noopSkipped} were no-ops and skipped; expected {callsPerGeneration} x {ga.MaximumGenerations.Value} generations = {callsPerGeneration * ga.MaximumGenerations.Value} total calls)");
       }
 
       if (o.PopulationSampleOutput != null) {

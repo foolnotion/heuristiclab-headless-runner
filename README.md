@@ -91,6 +91,20 @@ this into batch-run time estimates.
   a per-event budget and isn't the same distribution, see the
   operon-publications README for why). **Requires the instrumentation
   patch** — see `patches/` below.
+- `--crossover-donor-output <csv>` — export one row per **actual**
+  `SubtreeCrossover.Cross()` swap (`problem, noise, variant, seed,
+  generation, donor_length, inserted_length`; no-op calls, where no
+  donor branch fit the size budget, are logged internally with a
+  `(-1,-1)` sentinel to keep row-index-based generation inference
+  aligned with `--crossover-kernel-output`/`--crossover-noop-output`,
+  but are filtered out of the CSV itself since there's no real donor
+  event to report), for the donor side of the crossover kernel:
+  `donor_length` is parent1's *total* tree length (not just the excised
+  branch), `inserted_length` is the length of the branch actually
+  grafted into parent0 — for checking whether donor-tree size
+  correlates with the donor branch it contributes (operon's own
+  reinserter shows ~zero correlation there). **Requires the
+  instrumentation patch** — see `patches/` below.
 - `HL_EVAL_FREE=1` — swap in `PlaceholderEvaluator` (see
   `PlaceholderEvaluator.cs`) instead of the real GP/GPC evaluator: skips
   the LM constant-optimization / real fitness computation entirely,
