@@ -365,6 +365,7 @@ namespace HeuristicLab.HeadlessRunner {
       // config value -- so a silent fallback-to-default or a parse failure earlier would show up here.
       Console.WriteLine($"[verify] ga.MutationProbability.Value (read from algorithm object) = {ga.MutationProbability.Value.ToString(CultureInfo.InvariantCulture)}");
       Console.WriteLine($"[verify] ga.Selector (read from algorithm object) = {ga.Selector.GetType().Name}");
+      Console.WriteLine($"[verify] ga.Problem.Evaluator (read from algorithm object) = {problem.Evaluator.GetType().Name}, Maximization = {problem.Maximization.Value}");
 
       var sw = System.Diagnostics.Stopwatch.StartNew();
       ga.Prepare();
