@@ -294,6 +294,12 @@ namespace HeuristicLab.HeadlessRunner {
         // noise, for isolating crossover/reinsertion structural dynamics from fitness-driven
         // dynamics at a fraction of the per-generation cost. See PlaceholderEvaluator.cs.
         evaluator = new PlaceholderEvaluator();
+      } else if (isGpc && Environment.GetEnvironmentVariable("HL_LM_SCALE") == "1") {
+        // Scales the LM iteration budget by parameter count (maxIterations = 10*(k+1)), mirroring
+        // operon's own maxfev = iterations*(n_params+1) convention, to test whether HL's flat
+        // maxIterations=10 (regardless of k) is what pushes larger trees toward the degenerate
+        // quality=0 floor more often. See ScaledParameterOptimizationEvaluator.cs.
+        evaluator = new ScaledParameterOptimizationEvaluator();
       } else if (isGpc) {
         // The paper's actual .hl files used SymbolicRegressionParameterOptimizationEvaluator
         // (ALGLIB+AutoDiff Levenberg-Marquardt) -- confirmed via its AfterDeserialization backward-

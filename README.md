@@ -117,6 +117,21 @@ this into batch-run time estimates.
   unlike the crossover instrumentation below. Output:
   `problem, noise, variant, seed, generation, length, quality` (one row
   per sampled individual per generation).
+- `HL_LM_SCALE=1` — swap in `ScaledParameterOptimizationEvaluator` (see
+  `ScaledParameterOptimizationEvaluator.cs`) instead of the real GPC
+  evaluator: same ALGLIB+AutoDiff LM optimization
+  (`SymbolicRegressionParameterOptimizationEvaluator.OptimizeParameters`,
+  called directly and unmodified), but with the iteration budget scaled
+  by the tree's own parameter count (`maxIterations = 10*(k+1)`) instead
+  of the real evaluator's flat `maxIterations=10` — mirrors operon's own
+  `maxfev = iterations*(n_params+1)` convention, for testing whether a
+  flat LM budget disadvantages larger trees.
+  `SymbolicRegressionParameterOptimizationEvaluator` is `sealed`, so this
+  doesn't subclass it — it reimplements only the thin
+  `InstrumentedApply()`/`Evaluate()` wiring and delegates the actual
+  optimization to the real static helper, so there's no risk of the LM
+  logic itself drifting from the real evaluator. No HL source patch
+  needed for this one either.
 
 ### Instrumentation patch (`SubtreeCrossover.NoOpLog` / `.KernelLog`)
 
