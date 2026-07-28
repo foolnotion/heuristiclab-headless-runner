@@ -72,6 +72,13 @@ this into batch-run time estimates.
 - `HL_GENS` — max generations (default 20 for GPC, 200 for GP)
 - `HL_MUTATION_PROB` — mutation probability (default 0.15; set to `0`
   for a crossover-only ablation)
+- `HL_ELITES` — number of individuals `BestSelector` carries forward
+  unconditionally each generation (default 1). Set to `0` to disable
+  elitism entirely — every generation's whole population, including
+  what would have been the elite, gets replaced by newly-generated
+  offspring — for testing how much of the equilibrium-length effect
+  comes from *having* an elite at all (as opposed to the elite's own
+  size specifically, already tested separately via elite-tenure).
 - `HL_SELECTOR=random` — swap the default `TournamentSelector(GroupSize=5)`
   for `RandomSelector` (uniform, fitness-independent parent choice), for
   a selection-pressure ablation

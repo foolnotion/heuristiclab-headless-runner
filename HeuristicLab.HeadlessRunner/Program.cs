@@ -361,7 +361,7 @@ namespace HeuristicLab.HeadlessRunner {
       ga.SetSeedRandomly.Value = false;
       ga.PopulationSize.Value = Environment.GetEnvironmentVariable("HL_POPSIZE") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_POPSIZE")) : 1000;
       ga.MaximumGenerations.Value = Environment.GetEnvironmentVariable("HL_GENS") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_GENS")) : (isGpc ? 20 : 200);
-      ga.Elites.Value = 1;
+      ga.Elites.Value = Environment.GetEnvironmentVariable("HL_ELITES") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_ELITES")) : 1;
       ga.MutationProbability.Value = Environment.GetEnvironmentVariable("HL_MUTATION_PROB") != null ? double.Parse(Environment.GetEnvironmentVariable("HL_MUTATION_PROB"), CultureInfo.InvariantCulture) : 0.15;
 
       // HL_SELECTOR=random swaps in RandomSelector (uniform, fitness-independent parent choice)
@@ -448,6 +448,7 @@ namespace HeuristicLab.HeadlessRunner {
 
       // Read back from the live algorithm object right before Start() -- not the intended
       // config value -- so a silent fallback-to-default or a parse failure earlier would show up here.
+      Console.WriteLine($"[verify] ga.Elites.Value (read from algorithm object) = {ga.Elites.Value.ToString(CultureInfo.InvariantCulture)}");
       Console.WriteLine($"[verify] ga.MutationProbability.Value (read from algorithm object) = {ga.MutationProbability.Value.ToString(CultureInfo.InvariantCulture)}");
       Console.WriteLine($"[verify] ga.Selector (read from algorithm object) = {ga.Selector.GetType().Name}");
       Console.WriteLine($"[verify] ga.Problem.Evaluator (read from algorithm object) = {problem.Evaluator.GetType().Name}, Maximization = {problem.Maximization.Value}");
