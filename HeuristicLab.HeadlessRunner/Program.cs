@@ -22,6 +22,18 @@ using HeuristicLab.SequentialEngine;
 namespace HeuristicLab.HeadlessRunner {
   internal static class Program {
     private static int Main(string[] args) {
+      if (args.Length > 0 && args[0] == "--mode" && args.Length > 1 && args[1] == "ptc2sample") {
+        var sampleOpts = ParseSampleArgs(args);
+        if (sampleOpts == null) return 1;
+        try {
+          RunPtc2Sample(sampleOpts);
+          return 0;
+        } catch (Exception ex) {
+          Console.Error.WriteLine("ERROR: " + ex);
+          return 1;
+        }
+      }
+
       var opts = ParseArgs(args);
       if (opts == null) return 1;
 
@@ -73,6 +85,137 @@ namespace HeuristicLab.HeadlessRunner {
         return null;
       }
       return o;
+    }
+
+    private class SampleOptions {
+      public int Count = 20000;
+      public int Seed = 1;
+      public int MaxLength = 50;
+      public int MaxDepth = 20;
+      public string LengthsOutput;
+      public string SymbolsOutput;
+      public string ReferenceCsv;
+      public string Target;
+    }
+
+    private static SampleOptions ParseSampleArgs(string[] args) {
+      var o = new SampleOptions();
+      for (int i = 2; i < args.Length; i++) {
+        switch (args[i]) {
+          case "--count": o.Count = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
+          case "--seed": o.Seed = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
+          case "--max-length": o.MaxLength = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
+          case "--max-depth": o.MaxDepth = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
+          case "--lengths-output": o.LengthsOutput = args[++i]; break;
+          case "--symbols-output": o.SymbolsOutput = args[++i]; break;
+          case "--reference-csv": o.ReferenceCsv = args[++i]; break;
+          case "--target": o.Target = args[++i]; break;
+          default:
+            Console.Error.WriteLine("Unknown argument: " + args[i]);
+            return null;
+        }
+      }
+      if (o.LengthsOutput == null || o.SymbolsOutput == null || o.ReferenceCsv == null || o.Target == null) {
+        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --mode ptc2sample --count <n> --seed <int> [--max-length <n>] [--max-depth <n>] --reference-csv <csv> --target <col> --lengths-output <csv> --symbols-output <csv>");
+        return null;
+      }
+      return o;
+    }
+
+    // Grammar wiring is two-level: GroupSymbol (e.g. "Trigonometric Functions") gates whether its
+    // members are reachable in the grammar's allowed-child rules at all; each individual member
+    // symbol also has its own Enabled flag. Both must be true for a function to actually appear
+    // in generated trees. ConfigureAsDefaultRegressionGrammar() leaves Arithmetic Functions,
+    // Exponential/Logarithmic Functions, Real Valued Symbols and Terminals groups enabled, and
+    // disables the Trigonometric/Power/Special/Conditional/TimeSeries groups wholesale, plus
+    // Average/Absolute/HyperbolicTangent/Constant individually. We re-enable the specific
+    // groups/symbols the paper's function set needs on top of that baseline.
+    private static TypeCoherentExpressionGrammar BuildGrammar() {
+      var grammar = new TypeCoherentExpressionGrammar();
+      grammar.ConfigureAsDefaultRegressionGrammar();
+
+      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Subtraction).Enabled = false;
+
+      grammar.Symbols.First(s => s.Name == TypeCoherentExpressionGrammar.TrigonometricFunctionsName).Enabled = true;
+      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Tangent).Enabled = false;
+      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.HyperbolicTangent).Enabled = true;
+
+      grammar.Symbols.First(s => s.Name == TypeCoherentExpressionGrammar.PowerFunctionsName).Enabled = true;
+      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Power).Enabled = false;
+      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Root).Enabled = false;
+      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Cube).Enabled = false;
+      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.CubeRoot).Enabled = false;
+
+      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Constant).Enabled = true;
+      return grammar;
+    }
+
+    // Direct ProbabilisticTreeCreator (PTC2) invocation -- no GA, no selection/crossover/mutation,
+    // no Problem/Evaluator wiring at all. Matches operon's standalone-sampler ablation: isolates
+    // PTC2's own length distribution and symbol frequencies from any GA-loop confound.
+    private static void RunPtc2Sample(SampleOptions o) {
+      var grammar = BuildGrammar();
+
+      // TypeCoherentExpressionGrammar's Variable terminal isn't usable until it's told which
+      // variable names exist -- that wiring normally happens implicitly via
+      // SymbolicDataAnalysisProblem.OnProblemDataChanged -> grammar.ConfigureVariableSymbols(problemData)
+      // when a real GP/GPC run attaches ProblemData. A bare grammar with no ProblemData attached
+      // has zero configured variable names, so PTC2 can never select the Variable symbol at all --
+      // reproduced here explicitly against one of the experiment's own reference CSVs (train+test
+      // rows, minus the target column) so the sampled grammar matches what a real run actually uses.
+      var (refHeader, refRows) = ReadCsv(o.ReferenceCsv);
+      var refVariableNames = refHeader;
+      var refColumns = new List<System.Collections.IList>();
+      for (int c = 0; c < refVariableNames.Count; c++) {
+        var col = new List<double>(refRows.Count);
+        foreach (var r in refRows) col.Add(r[c]);
+        refColumns.Add(col);
+      }
+      var refDataset = new Dataset(refVariableNames, refColumns);
+      var refAllowedInputVariables = refVariableNames.Where(v => v != o.Target).ToList();
+      var refProblemData = new RegressionProblemData(refDataset, refAllowedInputVariables, o.Target);
+      grammar.ConfigureVariableSymbols(refProblemData);
+
+      var random = new MersenneTwister((uint)o.Seed);
+
+      var symbolCounts = new Dictionary<string, long>();
+      var lengths = new List<int>(o.Count);
+
+      for (int i = 0; i < o.Count; i++) {
+        var tree = ProbabilisticTreeCreator.Create(random, grammar, o.MaxLength, o.MaxDepth);
+        lengths.Add(tree.Length);
+        foreach (var node in tree.Root.IterateNodesPrefix()) {
+          var name = node.Symbol.Name;
+          symbolCounts.TryGetValue(name, out var count);
+          symbolCounts[name] = count + 1;
+        }
+        if (Environment.GetEnvironmentVariable("HL_DEBUG") == "1" && i < 3) {
+          Console.WriteLine($"sample {i}: length={tree.Length} depth={tree.Depth} formula={new InfixExpressionFormatter().Format(tree)}");
+        }
+      }
+
+      using (var lw = new StreamWriter(o.LengthsOutput, append: false)) {
+        lw.WriteLine("length");
+        foreach (var len in lengths)
+          lw.WriteLine(len.ToString(CultureInfo.InvariantCulture));
+      }
+
+      long totalNodes = symbolCounts.Values.Sum();
+      using (var sw2 = new StreamWriter(o.SymbolsOutput, append: false)) {
+        sw2.WriteLine("symbol,count,fraction");
+        foreach (var kvp in symbolCounts.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+          sw2.WriteLine(string.Join(",", kvp.Key, kvp.Value.ToString(CultureInfo.InvariantCulture), (kvp.Value / (double)totalNodes).ToString("R", CultureInfo.InvariantCulture)));
+      }
+
+      Console.WriteLine($"[verify] sampled {o.Count} trees via ProbabilisticTreeCreator.Create directly (no GA/selection/crossover/mutation)");
+      Console.WriteLine($"[verify] maxLength={o.MaxLength} maxDepth={o.MaxDepth} seed={o.Seed}");
+      Console.WriteLine($"length min={lengths.Min()} median={Median(lengths):F2} mean={lengths.Average():F2} max={lengths.Max()}");
+    }
+
+    private static double Median(List<int> values) {
+      var sorted = values.OrderBy(v => v).ToList();
+      int n = sorted.Count;
+      return n % 2 == 1 ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
     }
 
     private static (List<string> header, List<double[]> rows) ReadCsv(string path) {
@@ -131,30 +274,7 @@ namespace HeuristicLab.HeadlessRunner {
         }
       }
 
-      // Grammar wiring is two-level: GroupSymbol (e.g. "Trigonometric Functions") gates whether its
-      // members are reachable in the grammar's allowed-child rules at all; each individual member
-      // symbol also has its own Enabled flag. Both must be true for a function to actually appear
-      // in generated trees. ConfigureAsDefaultRegressionGrammar() leaves Arithmetic Functions,
-      // Exponential/Logarithmic Functions, Real Valued Symbols and Terminals groups enabled, and
-      // disables the Trigonometric/Power/Special/Conditional/TimeSeries groups wholesale, plus
-      // Average/Absolute/HyperbolicTangent/Constant individually. We re-enable the specific
-      // groups/symbols the paper's function set needs on top of that baseline.
-      var grammar = new TypeCoherentExpressionGrammar();
-      grammar.ConfigureAsDefaultRegressionGrammar();
-
-      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Subtraction).Enabled = false;
-
-      grammar.Symbols.First(s => s.Name == TypeCoherentExpressionGrammar.TrigonometricFunctionsName).Enabled = true;
-      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Tangent).Enabled = false;
-      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.HyperbolicTangent).Enabled = true;
-
-      grammar.Symbols.First(s => s.Name == TypeCoherentExpressionGrammar.PowerFunctionsName).Enabled = true;
-      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Power).Enabled = false;
-      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Root).Enabled = false;
-      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Cube).Enabled = false;
-      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.CubeRoot).Enabled = false;
-
-      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Constant).Enabled = true;
+      var grammar = BuildGrammar();
 
       bool isGpc = string.Equals(o.Variant, "GPC", StringComparison.OrdinalIgnoreCase);
 

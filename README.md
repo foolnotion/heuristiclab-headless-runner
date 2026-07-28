@@ -24,12 +24,21 @@ project.
 
 ## Building
 
-Drop `HeuristicLab.HeadlessRunner/` and `HeuristicLab.DataExporter/` in
-as sibling directories of a built `heal-research/HeuristicLab` checkout
-(both `.csproj` files reference sibling projects' compiled DLLs via
-`..\bin\*.dll` `HintPath`s, i.e. they expect to sit next to that
-checkout's own `HeuristicLab.HeadlessRunner`/`HeuristicLab.DataExporter`
-slots and its `bin\Release\` output), then build with MSBuild:
+This repo's `.csproj` files reference sibling HeuristicLab projects'
+compiled DLLs via `..\bin\*.dll` `HintPath`s (unchanged from when this
+lived inside a `heal-research/HeuristicLab` checkout, where `..\bin`
+was that checkout's own build output directory). To build standalone:
+
+1. Build a `heal-research/HeuristicLab` checkout so its `bin/` directory
+   is populated.
+2. Make this repo's `bin/` a directory junction/symlink pointing at that
+   checkout's `bin/` — e.g. on Windows:
+   `New-Item -ItemType Junction -Path bin -Target <path-to-HeuristicLab>\bin`
+3. Each project's `Properties/AssemblyInfo.cs` isn't tracked (gitignored,
+   like the `bin`/`obj` output dirs) — create a minimal one per project
+   if missing (`AssemblyTitle`/`AssemblyProduct`/a `Guid` attribute is
+   enough; MSBuild only needs the file to exist and compile).
+4. Build with MSBuild:
 
 ```
 MSBuild.exe HeuristicLab.HeadlessRunner/HeadlessRunner.csproj -p:Configuration=Release
@@ -47,3 +56,21 @@ MSBuild.exe HeuristicLab.HeadlessRunner/HeadlessRunner.csproj -p:Configuration=R
 - `HL_INTERPRETER=default` — use the managed linear tree interpreter
   instead of the native one
 - `HL_DEBUG=1` — verbose console diagnostics
+
+## PTC2 sampler mode
+
+`--mode ptc2sample --count <n> --seed <int> [--max-length <n>]
+[--max-depth <n>] --reference-csv <csv> --target <col> --lengths-output
+<csv> --symbols-output <csv>` invokes HL's `ProbabilisticTreeCreator`
+(PTC2) directly, with no GA/selection/crossover/mutation involved at
+all — just raw creator output, for isolating PTC2's own length
+distribution and symbol frequencies. `--reference-csv`/`--target` supply
+a real dataset so the grammar's `Variable` terminal is configured with
+actual variable names (`grammar.ConfigureVariableSymbols(problemData)`)
+the same way a real GP/GPC run's `Problem` wires them in — a bare
+grammar with no `ProblemData` attached has zero configured variable
+names and can never select `Variable` at all. Outputs: `lengths-output`
+(one `length` column, raw node count including both `RootSymbol`/
+`StartSymbol` wrapper nodes, uncorrected) and `symbols-output` (`symbol,
+count, fraction`, one row per distinct symbol name across all sampled
+trees).
