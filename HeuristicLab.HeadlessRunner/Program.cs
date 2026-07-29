@@ -160,9 +160,15 @@ namespace HeuristicLab.HeadlessRunner {
     // ProgramRootSymbol/StartSymbol wrapper nodes (exactly 1 each per tree, not mathematically
     // meaningful), emits real content nodes only, postfix (children before parent). Constant and
     // Number both collapse to a single "C<value>" leaf token (operon has one constant-leaf concept);
-    // Variable becomes "V<name>". Constant's value is always the grammar's shared, never-locally-reset
-    // default (0.0 here, since no evaluator has run) -- flagged explicitly in the header comment
-    // emitted by RunPtc2Sample below rather than silently treated as a real fitted value.
+    // Variable becomes "V<name>:<weight>" -- same explicit-scalar treatment as Constant/Number,
+    // since VariableTreeNodeBase.Weight is a real per-node value assigned at creation time
+    // (ResetLocalParameters draws it from Normal(WeightMu, WeightSigma), unlike Constant's Value,
+    // which is never locally reset -- see below), and dropping it would silently change the
+    // function the tree computes (weight is rarely exactly 1.0). One token per leaf either way, so
+    // this doesn't add a node the way an explicit "weight;name;mul" expansion would. Constant's
+    // value is always the grammar's shared, never-locally-reset default (0.0 here, since no
+    // evaluator has run) -- flagged explicitly in the header comment emitted by RunPtc2Sample below
+    // rather than silently treated as a real fitted value.
     private static string FormatPostfix(ISymbolicExpressionTree tree, out int tokenCount) {
       var tokens = new List<string>();
       foreach (var node in tree.Root.IterateNodesPostfix()) {
@@ -173,7 +179,7 @@ namespace HeuristicLab.HeadlessRunner {
         } else if (node is HeuristicLab.Problems.DataAnalysis.Symbolic.NumberTreeNode nt) {
           tokens.Add("C" + nt.Value.ToString("R", CultureInfo.InvariantCulture));
         } else if (node is HeuristicLab.Problems.DataAnalysis.Symbolic.VariableTreeNode vt) {
-          tokens.Add("V" + vt.VariableName);
+          tokens.Add("V" + vt.VariableName + ":" + vt.Weight.ToString("R", CultureInfo.InvariantCulture));
         } else if (PostfixFunctionTokens.TryGetValue(node.Symbol.GetType(), out var token)) {
           tokens.Add(token);
         } else {
