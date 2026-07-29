@@ -559,6 +559,13 @@ namespace HeuristicLab.HeadlessRunner {
       ga.Mutator = multiMut;
       Console.WriteLine($"[verify] enabled mutators = {string.Join(",", multiMut.Operators.CheckedItems.Select(x => x.Value.GetType().Name))} (HL_MUTATOR_SET={mutatorSetEnv ?? "unset (default: all 5)"})");
 
+      // TEMPORARY diagnostic, not a permanent feature: HL_MUTATION_TRACE=1 enables
+      // SymbolicExpressionTreeManipulator.LengthLog (see the ad-hoc, uncommitted patch to that file)
+      // to directly test each manipulator's structural size-neutrality -- same tree object, length
+      // read immediately before/after the Manipulate() call, zero RNG-order confound.
+      bool mutationTrace = Environment.GetEnvironmentVariable("HL_MUTATION_TRACE") == "1";
+      if (mutationTrace) HeuristicLab.Encodings.SymbolicExpressionTreeEncoding.SymbolicExpressionTreeManipulator.LengthLog = new List<Tuple<string, int, int>>();
+
       // Adds a per-individual (length, quality) population sample at configured generations,
       // via HL's own ScopeTreeLookupParameter mechanism (the same one BestAverageWorstQualityAnalyzer/
       // MinAverageMaxSymbolicExpressionTreeLengthAnalyzer already use to reach every individual) --
@@ -825,6 +832,18 @@ namespace HeuristicLab.HeadlessRunner {
 
       if (PurgeDegenerateAnalyzer.Enabled)
         Console.WriteLine($"[verify] degenerate purges = {PurgeDegenerateAnalyzer.PurgeCount} (parent-swap replacement; no-survivor PTC2 fallback {PurgeDegenerateAnalyzer.NoSurvivorFallbackCount} times, of which still-degenerate after fallback {PurgeDegenerateAnalyzer.FellBackToStillDegenerateCount} times; Apply() called {PurgeDegenerateAnalyzer.ApplyCallCount} times, saw {PurgeDegenerateAnalyzer.IndividualsSeenCount} individual-slots total)");
+
+      if (mutationTrace) {
+        var log = HeuristicLab.Encodings.SymbolicExpressionTreeEncoding.SymbolicExpressionTreeManipulator.LengthLog;
+        Console.WriteLine($"[verify] mutation trace: {log.Count} manipulator invocations total");
+        foreach (var grp in log.GroupBy(t => t.Item1)) {
+          int total = grp.Count();
+          int changed = grp.Count(t => t.Item2 != t.Item3);
+          Console.WriteLine($"  {grp.Key}: {total} invocations, {changed} changed tree length (size-neutral in {total - changed}/{total})");
+          foreach (var t in grp.Where(t => t.Item2 != t.Item3).Take(3))
+            Console.WriteLine($"    example: lengthBefore={t.Item2} lengthAfter={t.Item3}");
+        }
+      }
 
       Console.WriteLine($"{o.Problem} noise={o.Noise} {o.Variant} seed={o.Seed}: train NMSE%={trainNmse:F4} test NMSE%={testNmse:F4} ({sw.Elapsed.TotalSeconds:F1}s)");
     }

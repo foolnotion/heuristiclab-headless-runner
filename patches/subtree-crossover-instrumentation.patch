@@ -52,3 +52,47 @@ index a7d316e88..9a0b12ed1 100644
  
          if (crossoverPoint0.Child != null) {
            // manipulate the tree of parent0 in place
+diff --git a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Manipulators/SymbolicExpressionTreeManipulator.cs b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Manipulators/SymbolicExpressionTreeManipulator.cs
+index 001d9640e..a067aaa6f 100644
+--- a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Manipulators/SymbolicExpressionTreeManipulator.cs
++++ b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Manipulators/SymbolicExpressionTreeManipulator.cs
+@@ -19,6 +19,8 @@
+  */
+ #endregion
+ 
++using System;
++using System.Collections.Generic;
+ using HeuristicLab.Common;
+ using HeuristicLab.Core;
+ using HEAL.Attic;
+@@ -30,17 +32,29 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+   [Item("SymbolicExpressionTreeManipulator", "A base class for operators that manipulate symbolic expression trees.")]
+   [StorableType("9391A979-616B-4808-80E7-99D8802599AF")]
+   public abstract class SymbolicExpressionTreeManipulator : SymbolicExpressionTreeOperator, ISymbolicExpressionTreeManipulator {
++    // Debug instrumentation (not committed to heal-research/HeuristicLab, applied via
++    // heuristiclab-headless-runner's patches/apply-instrumentation.sh, see that repo's README) --
++    // logs (manipulator type name, length before, length after) for every manipulator invocation,
++    // enabled via HL_MUTATION_TRACE=1. Tests structural size-neutrality directly (same tree object,
++    // same call, zero RNG-order confound), as opposed to inferring it from population-level length
++    // differences across configs, which can't distinguish "this operator changes size" from "this
++    // operator's own random-draw count shifts subsequent individuals' crossover outcomes downstream."
++    // Null by default (zero-cost when unused).
++    public static List<Tuple<string, int, int>> LengthLog = null;
++
+     [StorableConstructor]
+     protected SymbolicExpressionTreeManipulator(StorableConstructorFlag _) : base(_) { }
+     protected SymbolicExpressionTreeManipulator(SymbolicExpressionTreeManipulator original, Cloner cloner) : base(original, cloner) { }
+     public SymbolicExpressionTreeManipulator()
+       : base() {
+-      
++
+     }
+ 
+     public sealed override IOperation InstrumentedApply() {
+       ISymbolicExpressionTree tree = SymbolicExpressionTreeParameter.ActualValue;
++      int lengthBefore = LengthLog != null ? tree.Length : 0;
+       Manipulate(RandomParameter.ActualValue, tree);
++      if (LengthLog != null) LengthLog.Add(Tuple.Create(GetType().Name, lengthBefore, tree.Length));
+ 
+       return base.InstrumentedApply();
+     }

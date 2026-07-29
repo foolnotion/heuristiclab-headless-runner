@@ -216,15 +216,45 @@ this into batch-run time estimates.
   disabled, not constant-value distributions (there's nothing to sample
   there without a real evaluator run).
 
-### Instrumentation patch (`SubtreeCrossover.NoOpLog` / `.KernelLog`)
+- `HL_MUTATOR_SET=<comma-list>` — restricts the enabled mutator subset to
+  exactly the given tokens (`onepoint`, `changetype`, `fulltree`,
+  `replace`, `remove`, mapping to `OnePointShaker`,
+  `ChangeNodeTypeManipulation`, `FullTreeShaker`,
+  `ReplaceBranchManipulation`, `RemoveBranchManipulation`
+  respectively), for isolating each operator's structural contribution
+  one at a time (e.g. a cumulative single-generation ablation from a
+  seeded population: `onepoint` -> `onepoint,changetype` ->
+  `onepoint,changetype,fulltree` -> ... ). Unset keeps the existing
+  default (all 5). Verified live (`[verify] enabled mutators = ...`).
+- `HL_MUTATION_TRACE=1` — enables
+  `SymbolicExpressionTreeManipulator.LengthLog` (see instrumentation
+  patch below): logs `(manipulator type name, length before, length
+  after)` for every manipulator invocation during the run, printing a
+  per-type summary at the end (`N invocations, M changed tree length`).
+  Tests structural size-neutrality of a manipulator directly — same
+  tree object, length read immediately before/after its own
+  `Manipulate()` call — as opposed to inferring it from population-level
+  length differences across configs with the operator enabled vs. not,
+  which can't distinguish "this operator changes size" from "this
+  operator's own random-draw count differs, shifting subsequent
+  individuals' crossover outcomes downstream, even though the operator
+  itself never touches tree structure." Used to confirm
+  `OnePointShaker`/`FullTreeShaker`/`ChangeNodeTypeManipulation` are all
+  genuinely size-neutral in HL (0 length changes across 163+ live
+  invocations each) despite `HL_MUTATOR_SET` ablation configs 1-4 (which
+  only add these three) *not* coming back byte-identical to each other —
+  the RNG-stream-shift explanation, not a hidden size-changing bug.
 
-`--crossover-noop-output` and `--crossover-kernel-output` need two
-fields on `SubtreeCrossover` (`public static List<Tuple<int,bool>>
-NoOpLog` and `public static List<Tuple<int,int>> KernelLog`, both null
-by default so they're zero-cost when unused) that aren't upstreamed —
+### Instrumentation patch (`SubtreeCrossover.NoOpLog` / `.KernelLog` / `.DonorLog`, `SymbolicExpressionTreeManipulator.LengthLog`)
+
+`--crossover-noop-output`/`--crossover-kernel-output`/
+`--crossover-donor-output` need three fields on `SubtreeCrossover`
+(`NoOpLog`/`KernelLog`/`DonorLog`) and `HL_MUTATION_TRACE` needs one
+field on `SymbolicExpressionTreeManipulator` (`LengthLog`), all null by
+default so they're zero-cost when unused, that aren't upstreamed —
 nothing gets committed to `heal-research/HeuristicLab` from this
-project. Rather than hand-editing `SubtreeCrossover.cs` from memory each
-time, apply/revert it as a scripted patch:
+project. Rather than hand-editing those files from memory each time,
+apply/revert it as a scripted patch:
 
 ```
 patches/apply-instrumentation.sh [path-to-HeuristicLab-checkout]   # defaults to ../HeuristicLab
@@ -232,15 +262,17 @@ patches/revert-instrumentation.sh [path-to-HeuristicLab-checkout]
 ```
 
 Both scripts apply/revert `patches/subtree-crossover-instrumentation.patch`
-against the target checkout and rebuild
-`HeuristicLab.Encodings.SymbolicExpressionTreeEncoding` in place. Always
-run `revert-instrumentation.sh` once you're done capturing
-`--crossover-noop-output`/`--crossover-kernel-output` data — the checkout
+(despite the name, it now covers both files above) against the target
+checkout and rebuild `HeuristicLab.Encodings.SymbolicExpressionTreeEncoding`
+in place. Always run `revert-instrumentation.sh` once you're done
+capturing `--crossover-noop-output`/`--crossover-kernel-output`/
+`--crossover-donor-output`/`HL_MUTATION_TRACE` data — the checkout
 should go back to a clean, uninstrumented `git status` before doing
 anything else with it. If the patch no longer applies cleanly (upstream
-`SubtreeCrossover.cs` changed), re-derive it: make the same edit by hand
-once, `git diff` it, and overwrite `patches/subtree-crossover-instrumentation.patch`
-with the new diff.
+`SubtreeCrossover.cs`/`SymbolicExpressionTreeManipulator.cs` changed),
+re-derive it: make the same edits by hand once, `git diff` both files
+together, and overwrite `patches/subtree-crossover-instrumentation.patch`
+with the new combined diff.
 
 ## PTC2 sampler mode
 
