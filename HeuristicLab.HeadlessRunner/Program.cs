@@ -63,6 +63,7 @@ namespace HeuristicLab.HeadlessRunner {
       public string CrossoverDonorOutput;
       public string PopulationSampleOutput;
       public string PopulationSampleGenerations; // comma-separated, e.g. "500,600,700,800,900"
+      public string MutationTraceOutput;
     }
 
     private static Options ParseArgs(string[] args) {
@@ -85,6 +86,7 @@ namespace HeuristicLab.HeadlessRunner {
           case "--crossover-donor-output": o.CrossoverDonorOutput = args[++i]; break;
           case "--population-sample-output": o.PopulationSampleOutput = args[++i]; break;
           case "--population-sample-generations": o.PopulationSampleGenerations = args[++i]; break;
+          case "--mutation-trace-output": o.MutationTraceOutput = args[++i]; break;
           default:
             Console.Error.WriteLine("Unknown argument: " + args[i]);
             return null;
@@ -848,6 +850,16 @@ namespace HeuristicLab.HeadlessRunner {
           }
           foreach (var t in grp.Where(t => t.Item2 != t.Item3).Take(3))
             Console.WriteLine($"    example: lengthBefore={t.Item2} lengthAfter={t.Item3}");
+        }
+
+        if (o.MutationTraceOutput != null) {
+          bool writeTraceHeader = !File.Exists(o.MutationTraceOutput);
+          using (var mtw = new StreamWriter(o.MutationTraceOutput, append: true)) {
+            if (writeTraceHeader)
+              mtw.WriteLine("problem,noise,variant,seed,manipulator,length_before,length_after");
+            foreach (var t in log)
+              mtw.WriteLine(string.Join(",", o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture), t.Item1, t.Item2.ToString(CultureInfo.InvariantCulture), t.Item3.ToString(CultureInfo.InvariantCulture)));
+          }
         }
       }
 
