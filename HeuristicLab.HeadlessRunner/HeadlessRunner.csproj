@@ -161,6 +161,8 @@
     <Compile Include="PopulationSampleAnalyzer.cs" />
     <Compile Include="ScaledParameterOptimizationEvaluator.cs" />
     <Compile Include="PurgeDegenerateAnalyzer.cs" />
+    <Compile Include="PostfixTreeParser.cs" />
+    <Compile Include="SeededTreeCreator.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

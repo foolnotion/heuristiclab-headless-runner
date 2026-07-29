@@ -467,7 +467,31 @@ namespace HeuristicLab.HeadlessRunner {
       // false) while our GPC evaluator (SymbolicRegressionParameterOptimizationEvaluator, Pearson R^2) maximizes
       // (Maximization => true) -- this line reads the correct direction from whichever evaluator was
       // selected above rather than hardcoding either, since the two variants now differ.
-      var problem = new SymbolicRegressionSingleObjectiveProblem(problemData, evaluator, new SymbolicDataAnalysisExpressionTreeCreator());
+      // HL_SEED_POPULATION=<path>: bypasses the normal PTC2-based SolutionCreator entirely for
+      // generation 0, injecting a pre-parsed population from a --postfix-output-format file instead
+      // (see PostfixTreeParser.cs/SeededTreeCreator.cs) -- for byte-identical-population comparisons
+      // against another engine seeded from the same file. Everything else in the operator graph
+      // (Selector/Crossover/Mutator/Evaluator/Elites) is untouched; only initial population creation
+      // is replaced.
+      string seedPopulationPath = Environment.GetEnvironmentVariable("HL_SEED_POPULATION");
+      ISymbolicDataAnalysisSolutionCreator treeCreator;
+      List<ISymbolicExpressionTree> seedTrees = null;
+      if (seedPopulationPath != null) {
+        seedTrees = PostfixTreeParser.ParseFile(seedPopulationPath, grammar);
+        SeededTreeCreator.SeedPopulation = seedTrees;
+        SeededTreeCreator.NextIndex = 0;
+        treeCreator = new SeededTreeCreator();
+
+        Console.WriteLine($"[verify] HL_SEED_POPULATION={seedPopulationPath}: parsed {seedTrees.Count} trees");
+        for (int i = 0; i < Math.Min(5, seedTrees.Count); i++) {
+          int contentTokens = File.ReadLines(seedPopulationPath).Skip(i).First().Split(';').Length;
+          Console.WriteLine($"  tree {i}: tree.Length={seedTrees[i].Length} (tree.Length-2={seedTrees[i].Length - 2}) sourceLineTokenCount={contentTokens} match={seedTrees[i].Length - 2 == contentTokens}");
+        }
+      } else {
+        treeCreator = new SymbolicDataAnalysisExpressionTreeCreator();
+      }
+
+      var problem = new SymbolicRegressionSingleObjectiveProblem(problemData, evaluator, treeCreator);
       problem.Maximization.Value = evaluator.Maximization;
       // Default is SymbolicDataAnalysisExpressionTreeLinearInterpreter (plain managed tree-walking);
       // NativeInterpreter wraps hl-native-interpreter.dll (native C++, already a dependency via
@@ -483,6 +507,8 @@ namespace HeuristicLab.HeadlessRunner {
       ga.Seed.Value = o.Seed;
       ga.SetSeedRandomly.Value = false;
       ga.PopulationSize.Value = Environment.GetEnvironmentVariable("HL_POPSIZE") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_POPSIZE")) : 1000;
+      if (seedTrees != null && seedTrees.Count != ga.PopulationSize.Value)
+        throw new InvalidOperationException($"HL_SEED_POPULATION file has {seedTrees.Count} trees but PopulationSize={ga.PopulationSize.Value} -- these must match exactly.");
       ga.MaximumGenerations.Value = Environment.GetEnvironmentVariable("HL_GENS") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_GENS")) : (isGpc ? 20 : 200);
       ga.Elites.Value = Environment.GetEnvironmentVariable("HL_ELITES") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_ELITES")) : 1;
       ga.MutationProbability.Value = Environment.GetEnvironmentVariable("HL_MUTATION_PROB") != null ? double.Parse(Environment.GetEnvironmentVariable("HL_MUTATION_PROB"), CultureInfo.InvariantCulture) : 0.15;
