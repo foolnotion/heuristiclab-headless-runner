@@ -838,8 +838,14 @@ namespace HeuristicLab.HeadlessRunner {
         Console.WriteLine($"[verify] mutation trace: {log.Count} manipulator invocations total");
         foreach (var grp in log.GroupBy(t => t.Item1)) {
           int total = grp.Count();
-          int changed = grp.Count(t => t.Item2 != t.Item3);
+          var changedList = grp.Where(t => t.Item2 != t.Item3).ToList();
+          int changed = changedList.Count;
           Console.WriteLine($"  {grp.Key}: {total} invocations, {changed} changed tree length (size-neutral in {total - changed}/{total})");
+          if (changed > 0) {
+            double meanDelta = changedList.Average(t => (double)(t.Item3 - t.Item2));
+            double meanAbsDelta = changedList.Average(t => (double)Math.Abs(t.Item3 - t.Item2));
+            Console.WriteLine($"    among changed: mean delta (after-before) = {meanDelta.ToString("F3", CultureInfo.InvariantCulture)}, mean |delta| = {meanAbsDelta.ToString("F3", CultureInfo.InvariantCulture)}");
+          }
           foreach (var t in grp.Where(t => t.Item2 != t.Item3).Take(3))
             Console.WriteLine($"    example: lengthBefore={t.Item2} lengthAfter={t.Item3}");
         }
