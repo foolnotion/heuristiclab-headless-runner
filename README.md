@@ -192,6 +192,29 @@ this into batch-run time estimates.
   before trusting a real run — sampled trees should contain only
   `Addition`/`Multiplication`/`Constant`/`Number`/`Variable` plus the
   `ProgramRootSymbol`/`StartSymbol` wrapper nodes, nothing else.
+- `HL_DISABLE_NUMBER=1` — disables the `Number` terminal (plain random
+  numeric literal, `MinValue=-20`/`MaxValue=20`, enabled by default),
+  leaving `Constant`/`Variable` as the only two terminal types — matches
+  operon's terminal set (`constant`, `variable`; no separate
+  "plain literal" symbol), for testing whether HL's 3-way terminal split
+  (`Number`+`Constant`+`Variable`) vs. operon's 2-way one fully explains
+  the measured terminal-frequency dilution between engines (predicted
+  ratio ~2/3, matches the measured ~0.68-0.70 almost exactly). Verified
+  live in both the real-run and `--mode ptc2sample` paths (`[verify]
+  Number.Enabled=...`). **Note**: with `Number` disabled and no evaluator
+  ever invoked (i.e. under `--mode ptc2sample`, which has no GA loop at
+  all), every sampled `Constant` node prints as `0` — `ConstantTreeNode`
+  has no `ResetLocalParameters` override (unlike `NumberTreeNode`, which
+  draws a fresh uniform-random value per node at creation time), so its
+  `Value` is just a pass-through read of the grammar's single shared
+  `Constant` symbol instance, which starts at C#'s default `double` value
+  (`0.0`) and is only ever written by the LM constant-optimization
+  evaluator during a real run's fitness evaluation. This is expected
+  behavior, not a bug — `Constant` is designed as an LM-optimizable
+  placeholder, not a randomized literal — but it means a bare PTC2 sample
+  can validate symbol-frequency/length distributions with `Number`
+  disabled, not constant-value distributions (there's nothing to sample
+  there without a real evaluator run).
 
 ### Instrumentation patch (`SubtreeCrossover.NoOpLog` / `.KernelLog`)
 

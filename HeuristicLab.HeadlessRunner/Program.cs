@@ -175,6 +175,17 @@ namespace HeuristicLab.HeadlessRunner {
         grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Square).Enabled = false;
         grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.SquareRoot).Enabled = false;
       }
+
+      // HL_DISABLE_NUMBER=1: disables the plain-literal Number terminal (MinValue=-20/MaxValue=20,
+      // enabled by default), leaving Constant/Variable as the only two terminal types -- matching
+      // operon's terminal set (constant, variable; no separate "plain literal" symbol). The paper's
+      // real GPC config has 3 active terminals (Number, Constant, Variable), which was found to fully
+      // explain the measured terminal-frequency dilution vs. operon (predicted 2/3 ratio ~matches the
+      // measured ~0.68-0.70). This toggle lets that be eliminated directly for a matched-terminal-set
+      // rerun, same pattern as the existing HL_GRAMMAR=addmul override above.
+      if (Environment.GetEnvironmentVariable("HL_DISABLE_NUMBER") == "1") {
+        grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Number).Enabled = false;
+      }
       return grammar;
     }
 
@@ -237,6 +248,7 @@ namespace HeuristicLab.HeadlessRunner {
 
       Console.WriteLine($"[verify] sampled {o.Count} trees via ProbabilisticTreeCreator.Create directly (no GA/selection/crossover/mutation)");
       Console.WriteLine($"[verify] maxLength={o.MaxLength} maxDepth={o.MaxDepth} seed={o.Seed}");
+      Console.WriteLine($"[verify] Number.Enabled={grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Number).Enabled} Constant.Enabled={grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Constant).Enabled} (HL_DISABLE_NUMBER={Environment.GetEnvironmentVariable("HL_DISABLE_NUMBER") ?? "unset"})");
       Console.WriteLine($"length min={lengths.Min()} median={Median(lengths):F2} mean={lengths.Average():F2} max={lengths.Max()}");
     }
 
@@ -452,6 +464,7 @@ namespace HeuristicLab.HeadlessRunner {
       Console.WriteLine($"[verify] ga.MutationProbability.Value (read from algorithm object) = {ga.MutationProbability.Value.ToString(CultureInfo.InvariantCulture)}");
       Console.WriteLine($"[verify] ga.Selector (read from algorithm object) = {ga.Selector.GetType().Name}");
       Console.WriteLine($"[verify] ga.Problem.Evaluator (read from algorithm object) = {problem.Evaluator.GetType().Name}, Maximization = {problem.Maximization.Value}");
+      Console.WriteLine($"[verify] Number.Enabled (read from grammar) = {grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Number).Enabled} (HL_DISABLE_NUMBER={Environment.GetEnvironmentVariable("HL_DISABLE_NUMBER") ?? "unset"})");
 
       var sw = System.Diagnostics.Stopwatch.StartNew();
       ga.Prepare();
