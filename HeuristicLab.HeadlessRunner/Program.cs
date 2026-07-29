@@ -104,6 +104,7 @@ namespace HeuristicLab.HeadlessRunner {
       public int MaxDepth = 20;
       public string LengthsOutput;
       public string SymbolsOutput;
+      public string TreesOutput;
       public string ReferenceCsv;
       public string Target;
     }
@@ -118,6 +119,7 @@ namespace HeuristicLab.HeadlessRunner {
           case "--max-depth": o.MaxDepth = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
           case "--lengths-output": o.LengthsOutput = args[++i]; break;
           case "--symbols-output": o.SymbolsOutput = args[++i]; break;
+          case "--trees-output": o.TreesOutput = args[++i]; break;
           case "--reference-csv": o.ReferenceCsv = args[++i]; break;
           case "--target": o.Target = args[++i]; break;
           default:
@@ -125,8 +127,8 @@ namespace HeuristicLab.HeadlessRunner {
             return null;
         }
       }
-      if (o.LengthsOutput == null || o.SymbolsOutput == null || o.ReferenceCsv == null || o.Target == null) {
-        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --mode ptc2sample --count <n> --seed <int> [--max-length <n>] [--max-depth <n>] --reference-csv <csv> --target <col> --lengths-output <csv> --symbols-output <csv>");
+      if (o.ReferenceCsv == null || o.Target == null || (o.LengthsOutput == null && o.SymbolsOutput == null && o.TreesOutput == null)) {
+        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --mode ptc2sample --count <n> --seed <int> [--max-length <n>] [--max-depth <n>] --reference-csv <csv> --target <col> [--lengths-output <csv>] [--symbols-output <csv>] [--trees-output <txt>]");
         return null;
       }
       return o;
@@ -219,34 +221,60 @@ namespace HeuristicLab.HeadlessRunner {
 
       var symbolCounts = new Dictionary<string, long>();
       var lengths = new List<int>(o.Count);
+      var formulas = o.TreesOutput != null ? new List<string>(o.Count) : null;
+      int attempts = 0, failures = 0;
+      var formatter = new InfixExpressionFormatter();
 
       for (int i = 0; i < o.Count; i++) {
-        var tree = ProbabilisticTreeCreator.Create(random, grammar, o.MaxLength, o.MaxDepth);
+        ISymbolicExpressionTree tree = null;
+        while (tree == null) {
+          attempts++;
+          try {
+            tree = ProbabilisticTreeCreator.Create(random, grammar, o.MaxLength, o.MaxDepth);
+          } catch (Exception ex) {
+            failures++;
+            if (Environment.GetEnvironmentVariable("HL_DEBUG") == "1")
+              Console.WriteLine($"[warn] tree creation attempt {attempts} failed: {ex.GetType().Name}: {ex.Message}");
+          }
+        }
         lengths.Add(tree.Length);
         foreach (var node in tree.Root.IterateNodesPrefix()) {
           var name = node.Symbol.Name;
           symbolCounts.TryGetValue(name, out var count);
           symbolCounts[name] = count + 1;
         }
+        if (formulas != null) formulas.Add(formatter.Format(tree));
         if (Environment.GetEnvironmentVariable("HL_DEBUG") == "1" && i < 3) {
-          Console.WriteLine($"sample {i}: length={tree.Length} depth={tree.Depth} formula={new InfixExpressionFormatter().Format(tree)}");
+          Console.WriteLine($"sample {i}: length={tree.Length} depth={tree.Depth} formula={formatter.Format(tree)}");
         }
       }
 
-      using (var lw = new StreamWriter(o.LengthsOutput, append: false)) {
-        lw.WriteLine("length");
-        foreach (var len in lengths)
-          lw.WriteLine(len.ToString(CultureInfo.InvariantCulture));
+      if (o.LengthsOutput != null) {
+        using (var lw = new StreamWriter(o.LengthsOutput, append: false)) {
+          lw.WriteLine("length");
+          foreach (var len in lengths)
+            lw.WriteLine(len.ToString(CultureInfo.InvariantCulture));
+        }
       }
 
-      long totalNodes = symbolCounts.Values.Sum();
-      using (var sw2 = new StreamWriter(o.SymbolsOutput, append: false)) {
-        sw2.WriteLine("symbol,count,fraction");
-        foreach (var kvp in symbolCounts.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
-          sw2.WriteLine(string.Join(",", kvp.Key, kvp.Value.ToString(CultureInfo.InvariantCulture), (kvp.Value / (double)totalNodes).ToString("R", CultureInfo.InvariantCulture)));
+      if (o.SymbolsOutput != null) {
+        long totalNodes = symbolCounts.Values.Sum();
+        using (var sw2 = new StreamWriter(o.SymbolsOutput, append: false)) {
+          sw2.WriteLine("symbol,count,fraction");
+          foreach (var kvp in symbolCounts.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+            sw2.WriteLine(string.Join(",", kvp.Key, kvp.Value.ToString(CultureInfo.InvariantCulture), (kvp.Value / (double)totalNodes).ToString("R", CultureInfo.InvariantCulture)));
+        }
+      }
+
+      if (formulas != null) {
+        using (var tw = new StreamWriter(o.TreesOutput, append: false)) {
+          foreach (var f in formulas)
+            tw.WriteLine(f);
+        }
       }
 
       Console.WriteLine($"[verify] sampled {o.Count} trees via ProbabilisticTreeCreator.Create directly (no GA/selection/crossover/mutation)");
+      Console.WriteLine($"[verify] attempts={attempts} failures={failures} (out of {o.Count} requested trees)");
       Console.WriteLine($"[verify] maxLength={o.MaxLength} maxDepth={o.MaxDepth} seed={o.Seed}");
       Console.WriteLine($"[verify] Number.Enabled={grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Number).Enabled} Constant.Enabled={grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Constant).Enabled} (HL_DISABLE_NUMBER={Environment.GetEnvironmentVariable("HL_DISABLE_NUMBER") ?? "unset"})");
       Console.WriteLine($"length min={lengths.Min()} median={Median(lengths):F2} mean={lengths.Average():F2} max={lengths.Max()}");
