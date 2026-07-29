@@ -105,6 +105,7 @@ namespace HeuristicLab.HeadlessRunner {
       public string LengthsOutput;
       public string SymbolsOutput;
       public string TreesOutput;
+      public string PostfixOutput;
       public string ReferenceCsv;
       public string Target;
     }
@@ -120,6 +121,7 @@ namespace HeuristicLab.HeadlessRunner {
           case "--lengths-output": o.LengthsOutput = args[++i]; break;
           case "--symbols-output": o.SymbolsOutput = args[++i]; break;
           case "--trees-output": o.TreesOutput = args[++i]; break;
+          case "--postfix-output": o.PostfixOutput = args[++i]; break;
           case "--reference-csv": o.ReferenceCsv = args[++i]; break;
           case "--target": o.Target = args[++i]; break;
           default:
@@ -127,11 +129,59 @@ namespace HeuristicLab.HeadlessRunner {
             return null;
         }
       }
-      if (o.ReferenceCsv == null || o.Target == null || (o.LengthsOutput == null && o.SymbolsOutput == null && o.TreesOutput == null)) {
-        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --mode ptc2sample --count <n> --seed <int> [--max-length <n>] [--max-depth <n>] --reference-csv <csv> --target <col> [--lengths-output <csv>] [--symbols-output <csv>] [--trees-output <txt>]");
+      if (o.ReferenceCsv == null || o.Target == null || (o.LengthsOutput == null && o.SymbolsOutput == null && o.TreesOutput == null && o.PostfixOutput == null)) {
+        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --mode ptc2sample --count <n> --seed <int> [--max-length <n>] [--max-depth <n>] --reference-csv <csv> --target <col> [--lengths-output <csv>] [--symbols-output <csv>] [--trees-output <txt>] [--postfix-output <txt>]");
         return null;
       }
       return o;
+    }
+
+    // Maps this experiment's enabled function symbols to operon's bare lowercase token names, for
+    // the --postfix-output dump. Includes a few tokens (sub/tan/cbrt/abs) this experiment's grammar
+    // never actually enables, in case PTC2 ever places one, rather than hitting an unmapped symbol.
+    private static readonly Dictionary<Type, string> PostfixFunctionTokens = new Dictionary<Type, string> {
+      { typeof(HeuristicLab.Problems.DataAnalysis.Symbolic.Addition), "add" },
+      { typeof(HeuristicLab.Problems.DataAnalysis.Symbolic.Subtraction), "sub" },
+      { typeof(HeuristicLab.Problems.DataAnalysis.Symbolic.Multiplication), "mul" },
+      { typeof(HeuristicLab.Problems.DataAnalysis.Symbolic.Division), "div" },
+      { typeof(HeuristicLab.Problems.DataAnalysis.Symbolic.Sine), "sin" },
+      { typeof(HeuristicLab.Problems.DataAnalysis.Symbolic.Cosine), "cos" },
+      { typeof(HeuristicLab.Problems.DataAnalysis.Symbolic.Tangent), "tan" },
+      { typeof(HeuristicLab.Problems.DataAnalysis.Symbolic.HyperbolicTangent), "tanh" },
+      { typeof(HeuristicLab.Problems.DataAnalysis.Symbolic.Exponential), "exp" },
+      { typeof(HeuristicLab.Problems.DataAnalysis.Symbolic.Logarithm), "log" },
+      { typeof(HeuristicLab.Problems.DataAnalysis.Symbolic.SquareRoot), "sqrt" },
+      { typeof(HeuristicLab.Problems.DataAnalysis.Symbolic.Square), "square" },
+      { typeof(HeuristicLab.Problems.DataAnalysis.Symbolic.CubeRoot), "cbrt" },
+      { typeof(HeuristicLab.Problems.DataAnalysis.Symbolic.Absolute), "abs" },
+    };
+
+    // Lossless postfix token dump for byte-comparable-population seeding on operon's side: skips the
+    // ProgramRootSymbol/StartSymbol wrapper nodes (exactly 1 each per tree, not mathematically
+    // meaningful), emits real content nodes only, postfix (children before parent). Constant and
+    // Number both collapse to a single "C<value>" leaf token (operon has one constant-leaf concept);
+    // Variable becomes "V<name>". Constant's value is always the grammar's shared, never-locally-reset
+    // default (0.0 here, since no evaluator has run) -- flagged explicitly in the header comment
+    // emitted by RunPtc2Sample below rather than silently treated as a real fitted value.
+    private static string FormatPostfix(ISymbolicExpressionTree tree, out int tokenCount) {
+      var tokens = new List<string>();
+      foreach (var node in tree.Root.IterateNodesPostfix()) {
+        var name = node.Symbol.Name;
+        if (name == "ProgramRootSymbol" || name == "StartSymbol") continue;
+        if (node is HeuristicLab.Problems.DataAnalysis.Symbolic.ConstantTreeNode ct) {
+          tokens.Add("C" + ct.Value.ToString("R", CultureInfo.InvariantCulture));
+        } else if (node is HeuristicLab.Problems.DataAnalysis.Symbolic.NumberTreeNode nt) {
+          tokens.Add("C" + nt.Value.ToString("R", CultureInfo.InvariantCulture));
+        } else if (node is HeuristicLab.Problems.DataAnalysis.Symbolic.VariableTreeNode vt) {
+          tokens.Add("V" + vt.VariableName);
+        } else if (PostfixFunctionTokens.TryGetValue(node.Symbol.GetType(), out var token)) {
+          tokens.Add(token);
+        } else {
+          throw new InvalidOperationException($"Unmapped symbol in postfix dump: {node.Symbol.GetType().Name} ({name})");
+        }
+      }
+      tokenCount = tokens.Count;
+      return string.Join(";", tokens);
     }
 
     // Grammar wiring is two-level: GroupSymbol (e.g. "Trigonometric Functions") gates whether its
@@ -222,6 +272,8 @@ namespace HeuristicLab.HeadlessRunner {
       var symbolCounts = new Dictionary<string, long>();
       var lengths = new List<int>(o.Count);
       var formulas = o.TreesOutput != null ? new List<string>(o.Count) : null;
+      var postfixLines = o.PostfixOutput != null ? new List<string>(o.Count) : null;
+      var postfixTokenCounts = o.PostfixOutput != null ? new List<int>(o.Count) : null;
       int attempts = 0, failures = 0;
       var formatter = new InfixExpressionFormatter();
 
@@ -244,6 +296,11 @@ namespace HeuristicLab.HeadlessRunner {
           symbolCounts[name] = count + 1;
         }
         if (formulas != null) formulas.Add(formatter.Format(tree));
+        if (postfixLines != null) {
+          var line = FormatPostfix(tree, out var tokenCount);
+          postfixLines.Add(line);
+          postfixTokenCounts.Add(tokenCount);
+        }
         if (Environment.GetEnvironmentVariable("HL_DEBUG") == "1" && i < 3) {
           Console.WriteLine($"sample {i}: length={tree.Length} depth={tree.Depth} formula={formatter.Format(tree)}");
         }
@@ -273,11 +330,31 @@ namespace HeuristicLab.HeadlessRunner {
         }
       }
 
+      if (postfixLines != null) {
+        using (var pw = new StreamWriter(o.PostfixOutput, append: false)) {
+          foreach (var l in postfixLines)
+            pw.WriteLine(l);
+        }
+      }
+
       Console.WriteLine($"[verify] sampled {o.Count} trees via ProbabilisticTreeCreator.Create directly (no GA/selection/crossover/mutation)");
       Console.WriteLine($"[verify] attempts={attempts} failures={failures} (out of {o.Count} requested trees)");
       Console.WriteLine($"[verify] maxLength={o.MaxLength} maxDepth={o.MaxDepth} seed={o.Seed}");
       Console.WriteLine($"[verify] Number.Enabled={grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Number).Enabled} Constant.Enabled={grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Constant).Enabled} (HL_DISABLE_NUMBER={Environment.GetEnvironmentVariable("HL_DISABLE_NUMBER") ?? "unset"})");
       Console.WriteLine($"length min={lengths.Min()} median={Median(lengths):F2} mean={lengths.Average():F2} max={lengths.Max()}");
+
+      if (postfixTokenCounts != null) {
+        Console.WriteLine("[verify] postfix token count vs. (tree.Length - 2) for first 5 trees (must match exactly -- wrapper nodes excluded on both sides):");
+        for (int i = 0; i < Math.Min(5, lengths.Count); i++) {
+          int expected = lengths[i] - 2;
+          bool ok = expected == postfixTokenCounts[i];
+          Console.WriteLine($"  tree {i}: tree.Length={lengths[i]} tree.Length-2={expected} postfixTokens={postfixTokenCounts[i]} match={ok}");
+        }
+        int mismatches = 0;
+        for (int i = 0; i < lengths.Count; i++)
+          if (lengths[i] - 2 != postfixTokenCounts[i]) mismatches++;
+        Console.WriteLine($"[verify] postfix token count mismatches across all {lengths.Count} trees: {mismatches}");
+      }
     }
 
     private static double Median(List<int> values) {
