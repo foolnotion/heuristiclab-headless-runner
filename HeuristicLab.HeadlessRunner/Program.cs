@@ -529,16 +529,35 @@ namespace HeuristicLab.HeadlessRunner {
       ga.Crossover = subtreeCx;
 
       var multiMut = ga.MutatorParameter.ValidValues.OfType<MultiSymbolicExpressionTreeManipulator>().First();
-      var allowedMutators = new HashSet<Type> {
-        typeof(ReplaceBranchManipulation),
-        typeof(FullTreeShaker),
-        typeof(OnePointShaker),
-        typeof(ChangeNodeTypeManipulation),
-        typeof(RemoveBranchManipulation),
+      // HL_MUTATOR_SET=<comma-list>: restricts the enabled mutator subset to exactly the given
+      // tokens, for isolating each operator's structural contribution one at a time (e.g. the
+      // cumulative single-generation ablation: onepoint -> +changetype -> +fulltree -> +replace ->
+      // +remove). Unset keeps the existing default (all 5, the full set used everywhere else in
+      // this investigation).
+      var mutatorTokenMap = new Dictionary<string, Type> {
+        { "onepoint", typeof(OnePointShaker) },
+        { "changetype", typeof(ChangeNodeTypeManipulation) },
+        { "fulltree", typeof(FullTreeShaker) },
+        { "replace", typeof(ReplaceBranchManipulation) },
+        { "remove", typeof(RemoveBranchManipulation) },
       };
+      HashSet<Type> allowedMutators;
+      string mutatorSetEnv = Environment.GetEnvironmentVariable("HL_MUTATOR_SET");
+      if (mutatorSetEnv != null) {
+        allowedMutators = new HashSet<Type>();
+        foreach (var tok in mutatorSetEnv.Split(',')) {
+          if (tok.Length == 0) continue;
+          if (!mutatorTokenMap.TryGetValue(tok.Trim(), out var t))
+            throw new InvalidOperationException($"Unknown HL_MUTATOR_SET token '{tok}' -- valid tokens: {string.Join(",", mutatorTokenMap.Keys)}");
+          allowedMutators.Add(t);
+        }
+      } else {
+        allowedMutators = new HashSet<Type>(mutatorTokenMap.Values);
+      }
       foreach (var op in multiMut.Operators.ToList())
         multiMut.Operators.SetItemCheckedState(op, allowedMutators.Contains(op.GetType()));
       ga.Mutator = multiMut;
+      Console.WriteLine($"[verify] enabled mutators = {string.Join(",", multiMut.Operators.CheckedItems.Select(x => x.Value.GetType().Name))} (HL_MUTATOR_SET={mutatorSetEnv ?? "unset (default: all 5)"})");
 
       // Adds a per-individual (length, quality) population sample at configured generations,
       // via HL's own ScopeTreeLookupParameter mechanism (the same one BestAverageWorstQualityAnalyzer/
