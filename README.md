@@ -138,6 +138,26 @@ this into batch-run time estimates.
   (default 0), for skipping the burn-in transient on equilibrium-region
   kernel dumps over many generations. **Requires the instrumentation
   patch** — see `patches/` below.
+- `--crossover-arity-diagnostic-output <csv> [--crossover-arity-diagnostic-min-generation <n>]`
+  — export one row per `SubtreeCrossover.Cross()` call with everything
+  `--crossover-joined-output` has, plus `removed_arity`/`inserted_arity`
+  (`SubtreeCount` of the excised/inserted node) and candidate-pool sizes
+  for both sides split by arity (`internal_candidates_excision`,
+  `leaf_candidates_excision`, `internal_arity1_candidates_excision`,
+  `internal_arity2_candidates_excision`, and the same four for `_donor`).
+  Built for the arity-2 compositional-bias diagnostic: distinguishes
+  whether `inserted_arity`/`removed_arity` favor arity-2 nodes because
+  the *candidate pool itself* is skewed toward arity-2 (a property of
+  which nodes get enumerated as eligible, before any draw), or because
+  the final uniform draw *itself* over-selects arity-2 beyond the pool's
+  own composition (a true selection-time bias). `SelectCrossoverPoint`/
+  `SelectRandomBranch` were restructured to compute both internal/leaf
+  candidate lists unconditionally (previously lazy — only the branch the
+  Bernoulli draw needed) so pool sizes are always available; this is
+  list-construction-only and doesn't change the RNG call sequence or
+  which branch is actually sampled from. `--crossover-arity-diagnostic-min-generation`
+  filters to `generation >= n` (default 0). **Requires the
+  instrumentation patch** — see `patches/` below.
 - `HL_EVAL_FREE=1` — swap in `PlaceholderEvaluator` (see
   `PlaceholderEvaluator.cs`) instead of the real GP/GPC evaluator: skips
   the LM constant-optimization / real fitness computation entirely,

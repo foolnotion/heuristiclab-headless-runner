@@ -1,8 +1,8 @@
 diff --git a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs
-index a7d316e88..ffe5f54d3 100644
+index a7d316e88..68dade090 100644
 --- a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs
 +++ b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs
-@@ -107,17 +107,39 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+@@ -107,17 +107,58 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
          MaximumSymbolicExpressionTreeLength.Value, MaximumSymbolicExpressionTreeDepth.Value);
      }
  
@@ -26,6 +26,22 @@ index a7d316e88..ffe5f54d3 100644
 +    // for testing whether tree shape (length-vs-depth) explains the removed/L ratio's decay.
 +    public static List<Tuple<int, int, int, int, int, int>> JoinedLog = null;
 +
++    // ArityDiagnosticEvent/ArityDiagnosticLog: full per-call record for the arity-2 compositional-
++    // bias diagnostic -- both excision and donor candidate-pool sizes (split by arity-1 vs arity-2
++    // among internal candidates), plus the arity actually removed/inserted, so a selection-time bias
++    // (arity-2 chosen more often than the candidate pool's own composition would predict) can be
++    // distinguished from the candidate pool simply reflecting the population's current composition.
++    public struct ArityDiagnosticEvent {
++      public int ParentLength, RemovedLength, DonorLength, InsertedLength;
++      public int ParentDepth, DonorDepth;
++      public int RemovedArity, InsertedArity; // SubtreeCount of the removed/inserted node; -1 if not applicable (extension point / no-op)
++      public int InternalCandidatesExcision, LeafCandidatesExcision;
++      public int InternalArity1CandidatesExcision, InternalArity2CandidatesExcision;
++      public int InternalCandidatesDonor, LeafCandidatesDonor; // -1 if not computed (no-op: SelectRandomBranch never called)
++      public int InternalArity1CandidatesDonor, InternalArity2CandidatesDonor;
++    }
++    public static List<ArityDiagnosticEvent> ArityDiagnosticLog = null;
++
      public static ISymbolicExpressionTree Cross(IRandom random,
        ISymbolicExpressionTree parent0, ISymbolicExpressionTree parent1,
        double probability,
@@ -35,35 +51,142 @@ index a7d316e88..ffe5f54d3 100644
 +      int parent0LengthBefore = parent0.Length;
 +      // select a random crossover point in the first parent
        CutPoint crossoverPoint0;
-       SelectCrossoverPoint(random, parent0, internalCrossoverPointProbability, maxTreeLength, maxTreeDepth, out crossoverPoint0);
+-      SelectCrossoverPoint(random, parent0, internalCrossoverPointProbability, maxTreeLength, maxTreeDepth, out crossoverPoint0);
++      int internalCandidatesExcision, leafCandidatesExcision, internalArity1CandidatesExcision, internalArity2CandidatesExcision;
++      SelectCrossoverPoint(random, parent0, internalCrossoverPointProbability, maxTreeLength, maxTreeDepth, out crossoverPoint0,
++        out internalCandidatesExcision, out leafCandidatesExcision, out internalArity1CandidatesExcision, out internalArity2CandidatesExcision);
  
        int childLength = crossoverPoint0.Child != null ? crossoverPoint0.Child.GetLength() : 0;
 -      // calculate the max length and depth that the inserted branch can have 
++      int removedArity = crossoverPoint0.Child != null ? crossoverPoint0.Child.SubtreeCount : -1;
 +      if (KernelLog != null) KernelLog.Add(Tuple.Create(parent0LengthBefore, childLength));
 +      // calculate the max length and depth that the inserted branch can have
        int maxInsertedBranchLength = Math.Max(0, maxTreeLength - (parent0.Length - childLength));
        int maxInsertedBranchDepth = Math.Max(0, maxTreeDepth - parent0.Root.GetBranchLevel(crossoverPoint0.Parent));
  
-@@ -131,11 +153,19 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+@@ -131,11 +172,37 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
        if (crossoverPoint0.IsMatchingPointType(null)) allowedBranches.Add(null);
  
        if (allowedBranches.Count == 0) {
 +        if (NoOpLog != null) NoOpLog.Add(Tuple.Create(parent0LengthBefore, true));
 +        if (DonorLog != null) DonorLog.Add(Tuple.Create(-1, -1));
 +        if (JoinedLog != null) JoinedLog.Add(Tuple.Create(parent0LengthBefore, childLength, parent1.Length, -1, parent0.Depth, parent1.Depth));
++        if (ArityDiagnosticLog != null) ArityDiagnosticLog.Add(new ArityDiagnosticEvent {
++          ParentLength = parent0LengthBefore, RemovedLength = childLength, DonorLength = parent1.Length, InsertedLength = -1,
++          ParentDepth = parent0.Depth, DonorDepth = parent1.Depth, RemovedArity = removedArity, InsertedArity = -1,
++          InternalCandidatesExcision = internalCandidatesExcision, LeafCandidatesExcision = leafCandidatesExcision,
++          InternalArity1CandidatesExcision = internalArity1CandidatesExcision, InternalArity2CandidatesExcision = internalArity2CandidatesExcision,
++          InternalCandidatesDonor = -1, LeafCandidatesDonor = -1, InternalArity1CandidatesDonor = -1, InternalArity2CandidatesDonor = -1
++        });
          return parent0;
        } else {
+-        var selectedBranch = SelectRandomBranch(random, allowedBranches, internalCrossoverPointProbability);
 +        if (NoOpLog != null) NoOpLog.Add(Tuple.Create(parent0LengthBefore, false));
-         var selectedBranch = SelectRandomBranch(random, allowedBranches, internalCrossoverPointProbability);
++        int internalCandidatesDonor, leafCandidatesDonor, internalArity1CandidatesDonor, internalArity2CandidatesDonor;
++        var selectedBranch = SelectRandomBranch(random, allowedBranches, internalCrossoverPointProbability,
++          out internalCandidatesDonor, out leafCandidatesDonor, out internalArity1CandidatesDonor, out internalArity2CandidatesDonor);
++        int insertedArity = selectedBranch != null ? selectedBranch.SubtreeCount : -1;
          if (selectedBranch != null)
            selectedBranch = (ISymbolicExpressionTreeNode)selectedBranch.Clone();
 +        int insertedLength = selectedBranch != null ? selectedBranch.GetLength() : 0;
 +        if (DonorLog != null)
 +          DonorLog.Add(Tuple.Create(parent1.Length, insertedLength));
 +        if (JoinedLog != null) JoinedLog.Add(Tuple.Create(parent0LengthBefore, childLength, parent1.Length, insertedLength, parent0.Depth, parent1.Depth));
++        if (ArityDiagnosticLog != null) ArityDiagnosticLog.Add(new ArityDiagnosticEvent {
++          ParentLength = parent0LengthBefore, RemovedLength = childLength, DonorLength = parent1.Length, InsertedLength = insertedLength,
++          ParentDepth = parent0.Depth, DonorDepth = parent1.Depth, RemovedArity = removedArity, InsertedArity = insertedArity,
++          InternalCandidatesExcision = internalCandidatesExcision, LeafCandidatesExcision = leafCandidatesExcision,
++          InternalArity1CandidatesExcision = internalArity1CandidatesExcision, InternalArity2CandidatesExcision = internalArity2CandidatesExcision,
++          InternalCandidatesDonor = internalCandidatesDonor, LeafCandidatesDonor = leafCandidatesDonor,
++          InternalArity1CandidatesDonor = internalArity1CandidatesDonor, InternalArity2CandidatesDonor = internalArity2CandidatesDonor
++        });
  
          if (crossoverPoint0.Child != null) {
            // manipulate the tree of parent0 in place
+@@ -154,7 +221,8 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+       }
+     }
+ 
+-    private static void SelectCrossoverPoint(IRandom random, ISymbolicExpressionTree parent0, double internalNodeProbability, int maxBranchLength, int maxBranchDepth, out CutPoint crossoverPoint) {
++    private static void SelectCrossoverPoint(IRandom random, ISymbolicExpressionTree parent0, double internalNodeProbability, int maxBranchLength, int maxBranchDepth, out CutPoint crossoverPoint,
++      out int internalCandidateCount, out int leafCandidateCount, out int internalArity1CandidateCount, out int internalArity2CandidateCount) {
+       if (internalNodeProbability < 0.0 || internalNodeProbability > 1.0) throw new ArgumentException("internalNodeProbability");
+       List<CutPoint> internalCrossoverPoints = new List<CutPoint>();
+       List<CutPoint> leafCrossoverPoints = new List<CutPoint>();
+@@ -181,6 +249,16 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+       }
+     );
+ 
++      internalCandidateCount = internalCrossoverPoints.Count;
++      leafCandidateCount = leafCrossoverPoints.Count;
++      internalArity1CandidateCount = 0;
++      internalArity2CandidateCount = 0;
++      foreach (var cp in internalCrossoverPoints) {
++        if (cp.Child == null) continue; // extension point, no existing node to classify by arity
++        if (cp.Child.SubtreeCount == 1) internalArity1CandidateCount++;
++        else if (cp.Child.SubtreeCount == 2) internalArity2CandidateCount++;
++      }
++
+       if (random.NextDouble() < internalNodeProbability) {
+         // select from internal node if possible
+         if (internalCrossoverPoints.Count > 0) {
+@@ -199,38 +277,39 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+       }
+     }
+ 
+-    private static ISymbolicExpressionTreeNode SelectRandomBranch(IRandom random, IEnumerable<ISymbolicExpressionTreeNode> branches, double internalNodeProbability) {
++    private static ISymbolicExpressionTreeNode SelectRandomBranch(IRandom random, IEnumerable<ISymbolicExpressionTreeNode> branches, double internalNodeProbability,
++      out int internalCandidateCount, out int leafCandidateCount, out int internalArity1CandidateCount, out int internalArity2CandidateCount) {
+       if (internalNodeProbability < 0.0 || internalNodeProbability > 1.0) throw new ArgumentException("internalNodeProbability");
+-      List<ISymbolicExpressionTreeNode> allowedInternalBranches;
+-      List<ISymbolicExpressionTreeNode> allowedLeafBranches;
++      // Both lists computed unconditionally (previously lazy, only the branch the Bernoulli draw
++      // needed) so candidate-pool sizes are always available for instrumentation -- this doesn't
++      // change which branch is actually sampled from or consume any extra random draws, since list
++      // construction itself is deterministic; the RNG call sequence (one NextDouble() for the
++      // Bernoulli choice, then exactly one SampleRandom() call) is unchanged.
++      List<ISymbolicExpressionTreeNode> allowedInternalBranches = (from branch in branches
++                                                                    where branch != null && branch.SubtreeCount > 0
++                                                                    select branch).ToList();
++      List<ISymbolicExpressionTreeNode> allowedLeafBranches = (from branch in branches
++                                                                where branch == null || branch.SubtreeCount == 0
++                                                                select branch).ToList();
++      internalCandidateCount = allowedInternalBranches.Count;
++      leafCandidateCount = allowedLeafBranches.Count;
++      internalArity1CandidateCount = allowedInternalBranches.Count(b => b != null && b.SubtreeCount == 1);
++      internalArity2CandidateCount = allowedInternalBranches.Count(b => b != null && b.SubtreeCount == 2);
++
+       if (random.NextDouble() < internalNodeProbability) {
+         // select internal node if possible
+-        allowedInternalBranches = (from branch in branches
+-                                   where branch != null && branch.SubtreeCount > 0
+-                                   select branch).ToList();
+         if (allowedInternalBranches.Count > 0) {
+           return allowedInternalBranches.SampleRandom(random);
+-
+         } else {
+           // no internal nodes allowed => select leaf nodes
+-          allowedLeafBranches = (from branch in branches
+-                                 where branch == null || branch.SubtreeCount == 0
+-                                 select branch).ToList();
+           return allowedLeafBranches.SampleRandom(random);
+         }
+       } else {
+         // select leaf node if possible
+-        allowedLeafBranches = (from branch in branches
+-                               where branch == null || branch.SubtreeCount == 0
+-                               select branch).ToList();
+         if (allowedLeafBranches.Count > 0) {
+           return allowedLeafBranches.SampleRandom(random);
+         } else {
+-          allowedInternalBranches = (from branch in branches
+-                                     where branch != null && branch.SubtreeCount > 0
+-                                     select branch).ToList();
+           return allowedInternalBranches.SampleRandom(random);
+-
+         }
+       }
+     }
 diff --git a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Manipulators/SymbolicExpressionTreeManipulator.cs b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Manipulators/SymbolicExpressionTreeManipulator.cs
 index 001d9640e..a067aaa6f 100644
 --- a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Manipulators/SymbolicExpressionTreeManipulator.cs

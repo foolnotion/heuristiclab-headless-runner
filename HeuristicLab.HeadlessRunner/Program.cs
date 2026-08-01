@@ -66,6 +66,8 @@ namespace HeuristicLab.HeadlessRunner {
       public string MutationTraceOutput;
       public string CrossoverJoinedOutput;
       public int CrossoverJoinedMinGeneration = 0;
+      public string CrossoverArityDiagnosticOutput;
+      public int CrossoverArityDiagnosticMinGeneration = 0;
     }
 
     private static Options ParseArgs(string[] args) {
@@ -91,6 +93,8 @@ namespace HeuristicLab.HeadlessRunner {
           case "--mutation-trace-output": o.MutationTraceOutput = args[++i]; break;
           case "--crossover-joined-output": o.CrossoverJoinedOutput = args[++i]; break;
           case "--crossover-joined-min-generation": o.CrossoverJoinedMinGeneration = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
+          case "--crossover-arity-diagnostic-output": o.CrossoverArityDiagnosticOutput = args[++i]; break;
+          case "--crossover-arity-diagnostic-min-generation": o.CrossoverArityDiagnosticMinGeneration = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
           default:
             Console.Error.WriteLine("Unknown argument: " + args[i]);
             return null;
@@ -632,6 +636,12 @@ namespace HeuristicLab.HeadlessRunner {
       // writer skips no-op rows. insertedLength = -1 for no-ops.
       if (o.CrossoverJoinedOutput != null)
         SubtreeCrossover.JoinedLog = new List<Tuple<int, int, int, int, int, int>>();
+      // Full per-call record for the arity-2 compositional-bias diagnostic: both excision/donor
+      // candidate-pool sizes (split arity-1 vs arity-2 among internal candidates) plus the arity
+      // actually removed/inserted, so a selection-time bias can be distinguished from the candidate
+      // pool simply reflecting the population's current composition.
+      if (o.CrossoverArityDiagnosticOutput != null)
+        SubtreeCrossover.ArityDiagnosticLog = new List<SubtreeCrossover.ArityDiagnosticEvent>();
 
       // Read back from the live algorithm object right before Start() -- not the intended
       // config value -- so a silent fallback-to-default or a parse failure earlier would show up here.
@@ -843,6 +853,45 @@ namespace HeuristicLab.HeadlessRunner {
           }
         }
         Console.WriteLine($"[verify] crossover joined events logged = {written} (of {joinedLog.Count} total calls, filtered to generation >= {o.CrossoverJoinedMinGeneration})");
+      }
+
+      if (o.CrossoverArityDiagnosticOutput != null) {
+        int callsPerGeneration = ga.PopulationSize.Value - ga.Elites.Value;
+        var arityLog = SubtreeCrossover.ArityDiagnosticLog;
+        bool writeArityHeader = !File.Exists(o.CrossoverArityDiagnosticOutput);
+        int written = 0;
+        using (var aw = new StreamWriter(o.CrossoverArityDiagnosticOutput, append: true)) {
+          if (writeArityHeader)
+            aw.WriteLine("problem,noise,variant,seed,generation,parent_length,removed_length,donor_length,inserted_length,parent_depth,donor_depth,"
+              + "removed_arity,inserted_arity,internal_candidates_excision,leaf_candidates_excision,internal_arity1_candidates_excision,internal_arity2_candidates_excision,"
+              + "internal_candidates_donor,leaf_candidates_donor,internal_arity1_candidates_donor,internal_arity2_candidates_donor");
+          for (int i = 0; i < arityLog.Count; i++) {
+            int generation = i / callsPerGeneration;
+            if (generation < o.CrossoverArityDiagnosticMinGeneration) continue;
+            var e = arityLog[i];
+            aw.WriteLine(string.Join(",",
+              o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
+              generation.ToString(CultureInfo.InvariantCulture),
+              e.ParentLength.ToString(CultureInfo.InvariantCulture),
+              e.RemovedLength.ToString(CultureInfo.InvariantCulture),
+              e.DonorLength.ToString(CultureInfo.InvariantCulture),
+              e.InsertedLength.ToString(CultureInfo.InvariantCulture),
+              e.ParentDepth.ToString(CultureInfo.InvariantCulture),
+              e.DonorDepth.ToString(CultureInfo.InvariantCulture),
+              e.RemovedArity.ToString(CultureInfo.InvariantCulture),
+              e.InsertedArity.ToString(CultureInfo.InvariantCulture),
+              e.InternalCandidatesExcision.ToString(CultureInfo.InvariantCulture),
+              e.LeafCandidatesExcision.ToString(CultureInfo.InvariantCulture),
+              e.InternalArity1CandidatesExcision.ToString(CultureInfo.InvariantCulture),
+              e.InternalArity2CandidatesExcision.ToString(CultureInfo.InvariantCulture),
+              e.InternalCandidatesDonor.ToString(CultureInfo.InvariantCulture),
+              e.LeafCandidatesDonor.ToString(CultureInfo.InvariantCulture),
+              e.InternalArity1CandidatesDonor.ToString(CultureInfo.InvariantCulture),
+              e.InternalArity2CandidatesDonor.ToString(CultureInfo.InvariantCulture)));
+            written++;
+          }
+        }
+        Console.WriteLine($"[verify] crossover arity-diagnostic events logged = {written} (of {arityLog.Count} total calls, filtered to generation >= {o.CrossoverArityDiagnosticMinGeneration})");
       }
 
       if (o.PopulationSampleOutput != null) {
