@@ -607,7 +607,11 @@ namespace HeuristicLab.HeadlessRunner {
       // to directly test each manipulator's structural size-neutrality -- same tree object, length
       // read immediately before/after the Manipulate() call, zero RNG-order confound.
       bool mutationTrace = Environment.GetEnvironmentVariable("HL_MUTATION_TRACE") == "1";
+#if HL_INSTRUMENTED
       if (mutationTrace) HeuristicLab.Encodings.SymbolicExpressionTreeEncoding.SymbolicExpressionTreeManipulator.LengthLog = new List<Tuple<string, int, int>>();
+#else
+      if (mutationTrace) throw new InvalidOperationException("HL_MUTATION_TRACE requires the HeuristicLab instrumentation patch.");
+#endif
 
       // Adds a per-individual (length, quality) population sample at configured generations,
       // via HL's own ScopeTreeLookupParameter mechanism (the same one BestAverageWorstQualityAnalyzer/
@@ -648,6 +652,7 @@ namespace HeuristicLab.HeadlessRunner {
 
       ga.Engine = new SequentialEngine.SequentialEngine();
 
+#if HL_INSTRUMENTED
       // TEMPORARY debug instrumentation (SubtreeCrossover.NoOpLog is a local-only field on this
       // checkout's HeuristicLab.Encodings.SymbolicExpressionTreeEncoding build, not committed to
       // heal-research/HeuristicLab): captures (parent0 length, is-noop) for every Cross() call
@@ -682,6 +687,11 @@ namespace HeuristicLab.HeadlessRunner {
       // focused on the question actually being asked).
       if (o.CrossoverMatchDiagnosticOutput != null)
         CutPoint.MatchDiagnosticLog = new List<CutPoint.MatchDiagnosticEvent>();
+#else
+      if (o.CrossoverNoopOutput != null || o.CrossoverKernelOutput != null || o.CrossoverDonorOutput != null
+        || o.CrossoverJoinedOutput != null || o.CrossoverArityDiagnosticOutput != null || o.CrossoverMatchDiagnosticOutput != null)
+        throw new InvalidOperationException("Crossover diagnostic outputs require the HeuristicLab instrumentation patch.");
+#endif
 
       // Read back from the live algorithm object right before Start() -- not the intended
       // config value -- so a silent fallback-to-default or a parse failure earlier would show up here.
@@ -801,6 +811,7 @@ namespace HeuristicLab.HeadlessRunner {
         }
       }
 
+#if HL_INSTRUMENTED
       if (o.CrossoverNoopOutput != null) {
         // Generation is inferred from call index, not tracked live: with CrossoverProbability=1.0
         // (never skipped) and the plain GeneticAlgorithm's fixed offspring count of
@@ -956,6 +967,7 @@ namespace HeuristicLab.HeadlessRunner {
         }
         Console.WriteLine($"[verify] crossover match-diagnostic events logged (arity-1 candidates only) = {matchLog.Count}");
       }
+#endif
 
       if (o.PopulationSampleOutput != null) {
         var sampleLog = PopulationSampleAnalyzer.Log;
@@ -995,6 +1007,7 @@ namespace HeuristicLab.HeadlessRunner {
       if (PurgeDegenerateAnalyzer.Enabled)
         Console.WriteLine($"[verify] degenerate purges = {PurgeDegenerateAnalyzer.PurgeCount} (parent-swap replacement; no-survivor PTC2 fallback {PurgeDegenerateAnalyzer.NoSurvivorFallbackCount} times, of which still-degenerate after fallback {PurgeDegenerateAnalyzer.FellBackToStillDegenerateCount} times; Apply() called {PurgeDegenerateAnalyzer.ApplyCallCount} times, saw {PurgeDegenerateAnalyzer.IndividualsSeenCount} individual-slots total)");
 
+#if HL_INSTRUMENTED
       if (mutationTrace) {
         var log = HeuristicLab.Encodings.SymbolicExpressionTreeEncoding.SymbolicExpressionTreeManipulator.LengthLog;
         Console.WriteLine($"[verify] mutation trace: {log.Count} manipulator invocations total");
@@ -1022,6 +1035,7 @@ namespace HeuristicLab.HeadlessRunner {
           }
         }
       }
+#endif
 
       Console.WriteLine($"{o.Problem} noise={o.Noise} {o.Variant} seed={o.Seed}: train NMSE%={trainNmse:F4} test NMSE%={testNmse:F4} ({sw.Elapsed.TotalSeconds:F1}s)");
     }
