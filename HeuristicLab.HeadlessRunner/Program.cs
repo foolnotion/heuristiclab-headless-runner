@@ -570,6 +570,11 @@ namespace HeuristicLab.HeadlessRunner {
 
       var subtreeCx = ga.CrossoverParameter.ValidValues.OfType<SubtreeCrossover>().First();
       ga.Crossover = subtreeCx;
+      // HL_CROSSOVER_PROB: SubtreeCrossover's own CrossoverProbability gate (defaults to 1.0,
+      // i.e. always crosses over) -- SubtreeCrossover.Cross() returns parent0 unchanged when the
+      // gate fails, mirroring Operon's --crossover-probability. Unset keeps the 1.0 default.
+      if (Environment.GetEnvironmentVariable("HL_CROSSOVER_PROB") != null)
+        subtreeCx.CrossoverProbability = double.Parse(Environment.GetEnvironmentVariable("HL_CROSSOVER_PROB"), CultureInfo.InvariantCulture);
 
       var multiMut = ga.MutatorParameter.ValidValues.OfType<MultiSymbolicExpressionTreeManipulator>().First();
       // HL_MUTATOR_SET=<comma-list>: restricts the enabled mutator subset to exactly the given
