@@ -36,7 +36,17 @@ namespace HeuristicLab.HeadlessRunner {
     // through the operator graph. Null by default (zero-cost / opt-in), matching the NoOpLog/
     // KernelLog pattern used for the crossover instrumentation.
     public static HashSet<int> TargetGenerations = null;
-    public static List<Tuple<int, int, int, int, double>> Log = null; // (generation, index, length, depth, quality)
+    public static List<Tuple<int, int, int, int, int, double>> Log = null; // (generation, index, length, depth, terminal_count, quality)
+
+    // For a tree built only from arity-0/1/2 symbols (this investigation's grammar, arithmetic
+    // symbols hard-capped to exactly 2 via SetSubtreeCount, everything else 0 or 1), the identity
+    // #terminals = #arity2_nodes + 1 lets terminal_count alone recover the arity-2 (branching) node
+    // count and fraction downstream, without needing a full per-node arity dump.
+    private static int CountTerminals(ISymbolicExpressionTree tree) {
+      int count = 0;
+      tree.Root.ForEachNodePostfix((n) => { if (n.SubtreeCount == 0) count++; });
+      return count;
+    }
 
     [StorableConstructor]
     private PopulationSampleAnalyzer(StorableConstructorFlag _) : base(_) { }
@@ -56,7 +66,7 @@ namespace HeuristicLab.HeadlessRunner {
           var trees = SymbolicExpressionTreeParameter.ActualValue;
           var qualities = QualityParameter.ActualValue;
           for (int i = 0; i < trees.Length; i++)
-            Log.Add(Tuple.Create(generation, i, trees[i].Length, trees[i].Depth, qualities[i].Value));
+            Log.Add(Tuple.Create(generation, i, trees[i].Length, trees[i].Depth, CountTerminals(trees[i]), qualities[i].Value));
         }
       }
       return base.Apply();

@@ -151,19 +151,27 @@ this into batch-run time estimates.
   only the `length_*` columns are informative. No HL source patch
   needed — this one's entirely in `PlaceholderEvaluator.cs`.
 - `--population-sample-output <csv> --population-sample-generations <comma-list>`
-  — dumps `(length, quality)` for every individual in the population at
+  — dumps per-individual stats for every individual in the population at
   the given generations (e.g. `--population-sample-generations
   500,600,700,800,900`), for measuring `correlation(length, fitness)`
   across the full population rather than just population-level
-  best/avg/worst. Adds a new `PopulationSampleAnalyzer` (see
-  `PopulationSampleAnalyzer.cs`) to `ga.Analyzer`, using the same
-  `ScopeTreeLookupParameter` mechanism HL's own
-  `BestAverageWorstQualityAnalyzer`/`MinAverageMaxSymbolicExpressionTreeLengthAnalyzer`
-  already use to reach every individual in the population. **No HL
-  source patch needed** — entirely new code in `PopulationSampleAnalyzer.cs`,
-  unlike the crossover instrumentation below. Output:
-  `problem, noise, variant, seed, generation, length, quality` (one row
-  per sampled individual per generation).
+  best/avg/worst, or tree-shape statistics over time. Adds a new
+  `PopulationSampleAnalyzer` (see `PopulationSampleAnalyzer.cs`) to
+  `ga.Analyzer`, using the same `ScopeTreeLookupParameter` mechanism HL's
+  own `BestAverageWorstQualityAnalyzer`/
+  `MinAverageMaxSymbolicExpressionTreeLengthAnalyzer` already use to reach
+  every individual in the population. **No HL source patch needed** —
+  entirely new code in `PopulationSampleAnalyzer.cs`, unlike the
+  crossover instrumentation below. Output: `problem, noise, variant,
+  seed, generation, individual_index, raw_length, bare_length, raw_depth,
+  bare_depth, terminal_count, quality` (one row per sampled individual
+  per generation). `terminal_count` (added for the bloat-mechanism
+  thread) is the number of arity-0 nodes in the tree; for a grammar built
+  only from arity-0/1/2 symbols (this investigation's, arithmetic
+  symbols hard-capped to exactly 2 via `SetSubtreeCount`), the identity
+  `#terminals = #arity2_nodes + 1` recovers the arity-2 (branching) node
+  count and fraction from `terminal_count` alone, without a full per-node
+  arity dump.
 - `HL_LM_SCALE=1` — swap in `ScaledParameterOptimizationEvaluator` (see
   `ScaledParameterOptimizationEvaluator.cs`) instead of the real GPC
   evaluator: same ALGLIB+AutoDiff LM optimization

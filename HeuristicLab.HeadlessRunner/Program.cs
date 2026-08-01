@@ -582,7 +582,7 @@ namespace HeuristicLab.HeadlessRunner {
         ga.Analyzer.Operators.SetItemCheckedState(sampleAnalyzer, true);
         PopulationSampleAnalyzer.TargetGenerations = new HashSet<int>(
           (o.PopulationSampleGenerations ?? "").Split(',').Where(s => s.Length > 0).Select(int.Parse));
-        PopulationSampleAnalyzer.Log = new List<Tuple<int, int, int, int, double>>();
+        PopulationSampleAnalyzer.Log = new List<Tuple<int, int, int, int, int, double>>();
       }
 
       // Intervention B: purges Quality<=0 (degenerate) individuals every generation, replacing
@@ -850,10 +850,10 @@ namespace HeuristicLab.HeadlessRunner {
         bool writeSampleHeader = !File.Exists(o.PopulationSampleOutput);
         using (var psw = new StreamWriter(o.PopulationSampleOutput, append: true)) {
           if (writeSampleHeader)
-            psw.WriteLine("problem,noise,variant,seed,generation,individual_index,raw_length,bare_length,raw_depth,bare_depth,quality");
+            psw.WriteLine("problem,noise,variant,seed,generation,individual_index,raw_length,bare_length,raw_depth,bare_depth,terminal_count,quality");
           foreach (var row in sampleLog) {
-            int generation = row.Item1, index = row.Item2, rawLength = row.Item3, rawDepth = row.Item4;
-            double quality = row.Item5;
+            int generation = row.Item1, index = row.Item2, rawLength = row.Item3, rawDepth = row.Item4, terminalCount = row.Item5;
+            double quality = row.Item6;
             psw.WriteLine(string.Join(",",
               o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
               generation.ToString(CultureInfo.InvariantCulture),
@@ -862,6 +862,7 @@ namespace HeuristicLab.HeadlessRunner {
               (rawLength - 2).ToString(CultureInfo.InvariantCulture),
               rawDepth.ToString(CultureInfo.InvariantCulture),
               (rawDepth - 2).ToString(CultureInfo.InvariantCulture),
+              terminalCount.ToString(CultureInfo.InvariantCulture),
               quality.ToString("R", CultureInfo.InvariantCulture)));
           }
         }
