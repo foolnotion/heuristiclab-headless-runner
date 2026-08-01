@@ -68,6 +68,7 @@ namespace HeuristicLab.HeadlessRunner {
       public int CrossoverJoinedMinGeneration = 0;
       public string CrossoverArityDiagnosticOutput;
       public int CrossoverArityDiagnosticMinGeneration = 0;
+      public string CrossoverMatchDiagnosticOutput;
     }
 
     private static Options ParseArgs(string[] args) {
@@ -95,6 +96,7 @@ namespace HeuristicLab.HeadlessRunner {
           case "--crossover-joined-min-generation": o.CrossoverJoinedMinGeneration = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
           case "--crossover-arity-diagnostic-output": o.CrossoverArityDiagnosticOutput = args[++i]; break;
           case "--crossover-arity-diagnostic-min-generation": o.CrossoverArityDiagnosticMinGeneration = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
+          case "--crossover-match-diagnostic-output": o.CrossoverMatchDiagnosticOutput = args[++i]; break;
           default:
             Console.Error.WriteLine("Unknown argument: " + args[i]);
             return null;
@@ -210,6 +212,32 @@ namespace HeuristicLab.HeadlessRunner {
     // groups/symbols the paper's function set needs on top of that baseline.
     private static TypeCoherentExpressionGrammar BuildGrammar() {
       var grammar = new TypeCoherentExpressionGrammar();
+      ConfigureGrammar(grammar);
+      return grammar;
+    }
+
+    // Extracted from BuildGrammar() so it can be re-applied after attaching the grammar to a
+    // SymbolicRegressionSingleObjectiveProblem. CRITICAL BUG WORKAROUND: assigning a grammar to
+    // problem.SymbolicExpressionTreeGrammar fires SymbolicExpressionTreeGrammarParameter.ValueChanged,
+    // which SymbolicRegressionSingleObjectiveProblem.ConfigureGrammarSymbols() (SymbolicRegression
+    // SingleObjectiveProblem.cs:110-113) handles by unconditionally calling
+    // grammar.ConfigureAsDefaultRegressionGrammar() AGAIN on the newly-attached grammar -- silently
+    // re-disabling the Trigonometric Functions and Power Functions symbol groups (cascading via
+    // GroupSymbol_Changed to Sine/Cosine/HyperbolicTangent/Square/SquareRoot individually), undoing
+    // this method's own re-enables. Confirmed live via HL_DEBUG_GRAMMAR=1: cos.Enabled flips
+    // True->False across exactly the `problem.SymbolicExpressionTreeGrammar = grammar;` statement in
+    // Program.cs, with the SAME symbol object (ReferenceEquals confirmed) -- not a different/cloned
+    // grammar. Exponential/Logarithm are unaffected since they're never toggled by
+    // ConfigureAsDefaultRegressionGrammar() at all. Discovered while tracking down why HL's crossover
+    // donor candidate pool passed exactly 100% of terminals/arity-2 nodes but only ~50% of arity-1
+    // nodes (Sine/Cosine/HyperbolicTangent/Square/SquareRoot always rejected, Exponential/Logarithm
+    // always accepted) -- this bug silently removed 5 of the 7 intended unary functions from
+    // crossover's reachable vocabulary for every GA-based round of this investigation to date (PTC2-
+    // sample-mode checks never caught it, since that mode never attaches a Problem and so never
+    // triggers the reset). Calling this method again after grammar attachment is the fix/workaround;
+    // no HL source patch needed, since the bug lives in a method the harness already fully controls
+    // the timing of.
+    private static void ConfigureGrammar(TypeCoherentExpressionGrammar grammar) {
       grammar.ConfigureAsDefaultRegressionGrammar();
 
       grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Subtraction).Enabled = false;
@@ -254,7 +282,6 @@ namespace HeuristicLab.HeadlessRunner {
       if (Environment.GetEnvironmentVariable("HL_DISABLE_NUMBER") == "1") {
         grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Number).Enabled = false;
       }
-      return grammar;
     }
 
     // Direct ProbabilisticTreeCreator (PTC2) invocation -- no GA, no selection/crossover/mutation,
@@ -510,6 +537,12 @@ namespace HeuristicLab.HeadlessRunner {
         ? (HeuristicLab.Problems.DataAnalysis.Symbolic.ISymbolicDataAnalysisExpressionTreeInterpreter)new SymbolicDataAnalysisExpressionTreeLinearInterpreter()
         : new HeuristicLab.Problems.DataAnalysis.Symbolic.NativeInterpreter();
       problem.SymbolicExpressionTreeGrammar = grammar;
+      // BUG WORKAROUND: SymbolicRegressionSingleObjectiveProblem.ConfigureGrammarSymbols() (fired by
+      // the assignment above) unconditionally calls grammar.ConfigureAsDefaultRegressionGrammar()
+      // again, silently re-disabling Trigonometric/Power Functions groups and reverting
+      // ConfigureGrammar()'s re-enables -- see ConfigureGrammar()'s own comment for the full
+      // discovery trace. Re-apply our customization now that the automatic reset has already fired.
+      ConfigureGrammar(grammar);
       problem.MaximumSymbolicExpressionTreeLength.Value = Environment.GetEnvironmentVariable("HL_MAXLENGTH") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_MAXLENGTH"), CultureInfo.InvariantCulture) : 50;
       problem.MaximumSymbolicExpressionTreeDepth.Value = Environment.GetEnvironmentVariable("HL_MAXDEPTH") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_MAXDEPTH"), CultureInfo.InvariantCulture) : 20;
 
@@ -642,6 +675,13 @@ namespace HeuristicLab.HeadlessRunner {
       // pool simply reflecting the population's current composition.
       if (o.CrossoverArityDiagnosticOutput != null)
         SubtreeCrossover.ArityDiagnosticLog = new List<SubtreeCrossover.ArityDiagnosticEvent>();
+      // Per-symbol-name record of every IsMatchingPointType(newChild) call for an arity-1 candidate
+      // (both accepted and rejected), with which of the two sub-checks failed -- for pinning down
+      // exactly which symbols/conditions cause the ~50% arity-1 candidate exclusion found in the
+      // arity-diagnostic round. Arity-1-only filter is inside CutPoint.cs itself (keeps log volume
+      // focused on the question actually being asked).
+      if (o.CrossoverMatchDiagnosticOutput != null)
+        CutPoint.MatchDiagnosticLog = new List<CutPoint.MatchDiagnosticEvent>();
 
       // Read back from the live algorithm object right before Start() -- not the intended
       // config value -- so a silent fallback-to-default or a parse failure earlier would show up here.
@@ -650,6 +690,12 @@ namespace HeuristicLab.HeadlessRunner {
       Console.WriteLine($"[verify] ga.Selector (read from algorithm object) = {ga.Selector.GetType().Name}");
       Console.WriteLine($"[verify] ga.Problem.Evaluator (read from algorithm object) = {problem.Evaluator.GetType().Name}, Maximization = {problem.Maximization.Value}");
       Console.WriteLine($"[verify] Number.Enabled (read from grammar) = {grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Number).Enabled} (HL_DISABLE_NUMBER={Environment.GetEnvironmentVariable("HL_DISABLE_NUMBER") ?? "unset"})");
+      // Guards against the ConfigureGrammarSymbols() reset bug (see ConfigureGrammar()'s own comment)
+      // ever resurfacing silently: confirms sin/cos/tanh/square/sqrt are actually reachable as
+      // crossover donor candidates immediately before the run starts, not just nominally Enabled.
+      Console.WriteLine($"[verify] grammar reachability (post ConfigureGrammar() re-apply): "
+        + $"Cosine.Enabled={grammar.GetSymbol("Cosine").Enabled} IsAllowedChildSymbol(Addition,Cosine)={grammar.IsAllowedChildSymbol(grammar.GetSymbol("Addition"), grammar.GetSymbol("Cosine"))}; "
+        + $"Square.Enabled={grammar.GetSymbol("Square").Enabled} IsAllowedChildSymbol(Addition,Square)={grammar.IsAllowedChildSymbol(grammar.GetSymbol("Addition"), grammar.GetSymbol("Square"))}");
 
       var sw = System.Diagnostics.Stopwatch.StartNew();
       ga.Prepare();
@@ -893,6 +939,22 @@ namespace HeuristicLab.HeadlessRunner {
           }
         }
         Console.WriteLine($"[verify] crossover arity-diagnostic events logged = {written} (of {arityLog.Count} total calls, filtered to generation >= {o.CrossoverArityDiagnosticMinGeneration})");
+      }
+
+      if (o.CrossoverMatchDiagnosticOutput != null) {
+        var matchLog = CutPoint.MatchDiagnosticLog;
+        bool writeMatchHeader = !File.Exists(o.CrossoverMatchDiagnosticOutput);
+        using (var mw = new StreamWriter(o.CrossoverMatchDiagnosticOutput, append: true)) {
+          if (writeMatchHeader)
+            mw.WriteLine("problem,noise,variant,seed,parent_symbol,child_symbol,child_arity,contains_symbol,allowed_child_symbol,descendant_valid,final_result");
+          foreach (var e in matchLog) {
+            mw.WriteLine(string.Join(",",
+              o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
+              e.ParentSymbolName, e.ChildSymbolName, e.ChildArity.ToString(CultureInfo.InvariantCulture),
+              e.ContainsSymbol.ToString(), e.AllowedChildSymbol.ToString(), e.DescendantValid.ToString(), e.FinalResult.ToString()));
+          }
+        }
+        Console.WriteLine($"[verify] crossover match-diagnostic events logged (arity-1 candidates only) = {matchLog.Count}");
       }
 
       if (o.PopulationSampleOutput != null) {

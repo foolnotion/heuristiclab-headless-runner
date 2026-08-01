@@ -1,8 +1,8 @@
 diff --git a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs
-index a7d316e88..6395662ea 100644
+index a7d316e88..0360872ed 100644
 --- a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs
 +++ b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs
-@@ -107,17 +107,70 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+@@ -107,17 +107,71 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
          MaximumSymbolicExpressionTreeLength.Value, MaximumSymbolicExpressionTreeDepth.Value);
      }
  
@@ -60,6 +60,7 @@ index a7d316e88..6395662ea 100644
        double internalCrossoverPointProbability, int maxTreeLength, int maxTreeDepth) {
        if ((probability < 1) && (random.NextDouble() >= probability)) return parent0;
 -      // select a random crossover point in the first parent 
++
 +      int parent0LengthBefore = parent0.Length;
 +      // select a random crossover point in the first parent
        CutPoint crossoverPoint0;
@@ -76,7 +77,7 @@ index a7d316e88..6395662ea 100644
        int maxInsertedBranchLength = Math.Max(0, maxTreeLength - (parent0.Length - childLength));
        int maxInsertedBranchDepth = Math.Max(0, maxTreeDepth - parent0.Root.GetBranchLevel(crossoverPoint0.Parent));
  
-@@ -130,12 +183,42 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+@@ -130,12 +184,42 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
        // empty branch
        if (crossoverPoint0.IsMatchingPointType(null)) allowedBranches.Add(null);
  
@@ -120,7 +121,7 @@ index a7d316e88..6395662ea 100644
  
          if (crossoverPoint0.Child != null) {
            // manipulate the tree of parent0 in place
-@@ -154,7 +237,8 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+@@ -154,7 +238,8 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
        }
      }
  
@@ -130,7 +131,7 @@ index a7d316e88..6395662ea 100644
        if (internalNodeProbability < 0.0 || internalNodeProbability > 1.0) throw new ArgumentException("internalNodeProbability");
        List<CutPoint> internalCrossoverPoints = new List<CutPoint>();
        List<CutPoint> leafCrossoverPoints = new List<CutPoint>();
-@@ -181,6 +265,16 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+@@ -181,6 +266,16 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
        }
      );
  
@@ -147,7 +148,7 @@ index a7d316e88..6395662ea 100644
        if (random.NextDouble() < internalNodeProbability) {
          // select from internal node if possible
          if (internalCrossoverPoints.Count > 0) {
-@@ -199,38 +293,39 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+@@ -199,38 +294,39 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
        }
      }
  
@@ -202,6 +203,68 @@ index a7d316e88..6395662ea 100644
            return allowedInternalBranches.SampleRandom(random);
 -
          }
+       }
+     }
+diff --git a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/CutPoint.cs b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/CutPoint.cs
+index d6d65088b..16b32a20b 100644
+--- a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/CutPoint.cs
++++ b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/CutPoint.cs
+@@ -28,7 +28,20 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+ 
+     public int ChildIndex { get; private set; }
+ 
+-    public CutPoint(ISymbolicExpressionTreeNode parent, ISymbolicExpressionTreeNode child) {      
++    // TEMPORARY debug instrumentation (not committed to heal-research/HeuristicLab) -- see
++    // heuristiclab-headless-runner README. Records, for every IsMatchingPointType(newChild!=null)
++    // call, which of the two sub-checks (root-symbol compatibility vs. recursive whole-branch
++    // descendant-arity validity) actually failed, plus the parent/child symbol names and the
++    // child's own arity -- for pinning down exactly which symbols/conditions cause the ~50%
++    // arity-1 candidate exclusion found in the arity-bias-diagnostic round.
++    public struct MatchDiagnosticEvent {
++      public string ParentSymbolName, ChildSymbolName;
++      public int ChildArity;
++      public bool ContainsSymbol, AllowedChildSymbol, DescendantValid, FinalResult;
++    }
++    public static System.Collections.Generic.List<MatchDiagnosticEvent> MatchDiagnosticLog = null;
++
++    public CutPoint(ISymbolicExpressionTreeNode parent, ISymbolicExpressionTreeNode child) {
+       this.Parent = parent;
+       this.Child = child;
+       this.ChildIndex = parent.IndexOfSubtree(child);
+@@ -44,14 +57,21 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+     public bool IsMatchingPointType(ISymbolicExpressionTreeNode newChild) {
+       var parent = this.Parent;
+       if (newChild == null) {
+-        // make sure that one subtree can be removed and that only the last subtree is removed 
++        // make sure that one subtree can be removed and that only the last subtree is removed
+         return grammar.GetMinimumSubtreeCount(parent.Symbol) < parent.SubtreeCount &&
+           this.ChildIndex == parent.SubtreeCount - 1;
+       } else {
++        bool containsSymbol = grammar.ContainsSymbol(newChild.Symbol);
++        bool allowedChildSymbol = containsSymbol && grammar.IsAllowedChildSymbol(parent.Symbol, newChild.Symbol, this.ChildIndex);
++        bool logThis = MatchDiagnosticLog != null && newChild.SubtreeCount == 1; // arity-1 candidates only, to keep log volume focused
+         // check syntax constraints of direct parent - child relation
+-        if (!grammar.ContainsSymbol(newChild.Symbol) ||
+-            !grammar.IsAllowedChildSymbol(parent.Symbol, newChild.Symbol, this.ChildIndex))
++        if (!containsSymbol || !allowedChildSymbol) {
++          if (logThis) MatchDiagnosticLog.Add(new MatchDiagnosticEvent {
++            ParentSymbolName = parent.Symbol.Name, ChildSymbolName = newChild.Symbol.Name, ChildArity = newChild.SubtreeCount,
++            ContainsSymbol = containsSymbol, AllowedChildSymbol = allowedChildSymbol, DescendantValid = false, FinalResult = false
++          });
+           return false;
++        }
+ 
+         bool result = true;
+         // check point type for the whole branch
+@@ -62,6 +82,10 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+             n.SubtreeCount >= grammar.GetMinimumSubtreeCount(n.Symbol) &&
+             n.SubtreeCount <= grammar.GetMaximumSubtreeCount(n.Symbol);
+         });
++        if (logThis) MatchDiagnosticLog.Add(new MatchDiagnosticEvent {
++          ParentSymbolName = parent.Symbol.Name, ChildSymbolName = newChild.Symbol.Name, ChildArity = newChild.SubtreeCount,
++          ContainsSymbol = containsSymbol, AllowedChildSymbol = allowedChildSymbol, DescendantValid = result, FinalResult = result
++        });
+         return result;
        }
      }
 diff --git a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Manipulators/SymbolicExpressionTreeManipulator.cs b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Manipulators/SymbolicExpressionTreeManipulator.cs

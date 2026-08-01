@@ -158,6 +158,54 @@ this into batch-run time estimates.
   which branch is actually sampled from. `--crossover-arity-diagnostic-min-generation`
   filters to `generation >= n` (default 0). **Requires the
   instrumentation patch** — see `patches/` below.
+- `--crossover-match-diagnostic-output <csv>` — export one row per
+  `IsMatchingPointType(newChild)` call for **arity-1 candidates only**
+  (filter is inside `CutPoint.cs` itself, to keep volume focused):
+  `problem, noise, variant, seed, parent_symbol, child_symbol,
+  child_arity, contains_symbol, allowed_child_symbol, descendant_valid,
+  final_result`. This is what actually found and pinned down the
+  `ConfigureGrammarSymbols()` bug documented on `ConfigureGrammar()` in
+  `Program.cs` (see below) — grouping by `child_symbol` alone showed a
+  clean 0%/100% split fully independent of `parent_symbol`, which
+  wouldn't make sense for a legitimate type-compatibility restriction
+  and pointed straight at "this symbol's `Enabled` flag is wrong",
+  which live reference-equality checks then confirmed. **Requires the
+  instrumentation patch** — see `patches/` below.
+
+## Known upstream gotcha: grammar customization silently reset by Problem attachment
+
+**If you see a symbol you explicitly enabled behave as if it's
+disabled once a real GP/GPC run starts (but not when checked right
+after building the grammar), this is why, and it's already worked
+around in `Program.cs` — read this before re-debugging it.**
+`SymbolicRegressionSingleObjectiveProblem.ConfigureGrammarSymbols()`
+(`SymbolicRegressionSingleObjectiveProblem.cs:110-113` in the main HL
+checkout) is wired to `SymbolicExpressionTreeGrammarParameter
+.ValueChanged`, so the instant `problem.SymbolicExpressionTreeGrammar
+= grammar;` runs, it calls `grammar.ConfigureAsDefaultRegressionGrammar()`
+again on the very grammar object you just finished customizing — which
+disables the Trigonometric Functions and Power Functions symbol
+groups (cascading via `GroupSymbol_Changed` to
+Sine/Cosine/HyperbolicTangent/Square/SquareRoot individually), silently
+undoing `ConfigureGrammar()`'s own re-enables. Confirmed live: the
+*same* symbol object (`ReferenceEquals` checked) has `Enabled=True`
+immediately before that assignment and `Enabled=False` immediately
+after. `Exponential`/`Logarithm` are unaffected since
+`ConfigureAsDefaultRegressionGrammar()` never touches them.
+`--mode ptc2sample` never triggers this (it never attaches a
+`Problem`), which is why the existing "verify with `--mode ptc2sample
+--symbols-output` before trusting a real run" advice elsewhere in this
+README didn't catch it — that verification path is structurally
+immune to the exact bug it needed to catch. **Fix/workaround**: `Program.cs`
+now calls `ConfigureGrammar(grammar)` again immediately after
+`problem.SymbolicExpressionTreeGrammar = grammar;`, and a permanent
+`[verify] grammar reachability` log line checks
+`IsAllowedChildSymbol(Addition, Cosine)`/`(Addition, Square)` live,
+right before `ga.Start()`, so a regression here can never again pass
+silently. **This bug was present, unnoticed, for every GA-based round
+of this investigation before it was found** — see the
+`operon-publications` README's arity-bias-diagnostic rounds for the
+full discovery trace and what it means for prior findings.
 - `HL_EVAL_FREE=1` — swap in `PlaceholderEvaluator` (see
   `PlaceholderEvaluator.cs`) instead of the real GP/GPC evaluator: skips
   the LM constant-optimization / real fitness computation entirely,

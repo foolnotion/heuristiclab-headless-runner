@@ -1,9 +1,9 @@
 #!/bin/bash
 # Applies patches/subtree-crossover-instrumentation.patch to a sibling heal-research/HeuristicLab
 # checkout, and rebuilds the affected project so the harness can link against the instrumented
-# fields (SubtreeCrossover.NoOpLog / .KernelLog / .DonorLog, SymbolicExpressionTreeManipulator
-# .LengthLog). Never commit the patched state to heal-research/HeuristicLab -- run
-# revert-instrumentation.sh when done.
+# fields (SubtreeCrossover.NoOpLog / .KernelLog / .DonorLog / .JoinedLog / .ArityDiagnosticLog,
+# SymbolicExpressionTreeManipulator.LengthLog, CutPoint.MatchDiagnosticLog). Never commit the
+# patched state to heal-research/HeuristicLab -- run revert-instrumentation.sh when done.
 #
 # Usage: patches/apply-instrumentation.sh [path-to-HeuristicLab-checkout]
 # Defaults to ../HeuristicLab relative to this repo (the layout this harness assumes throughout).
@@ -15,11 +15,12 @@ HL_DIR="$(cd "$HL_DIR" && pwd)"
 if git -C "$HL_DIR" diff --quiet \
     HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs \
     HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Manipulators/SymbolicExpressionTreeManipulator.cs \
+    HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/CutPoint.cs \
     2>/dev/null; then
   echo "Applying instrumentation patch to $HL_DIR ..."
   git -C "$HL_DIR" apply "$HERE/subtree-crossover-instrumentation.patch"
 else
-  echo "SubtreeCrossover.cs/SymbolicExpressionTreeManipulator.cs already have local changes in $HL_DIR -- assuming instrumentation is already applied, skipping patch."
+  echo "SubtreeCrossover.cs/SymbolicExpressionTreeManipulator.cs/CutPoint.cs already have local changes in $HL_DIR -- assuming instrumentation is already applied, skipping patch."
 fi
 
 MSBUILD="/c/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/MSBuild.exe"
