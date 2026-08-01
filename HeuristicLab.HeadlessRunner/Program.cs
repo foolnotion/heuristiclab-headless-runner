@@ -64,6 +64,8 @@ namespace HeuristicLab.HeadlessRunner {
       public string PopulationSampleOutput;
       public string PopulationSampleGenerations; // comma-separated, e.g. "500,600,700,800,900"
       public string MutationTraceOutput;
+      public string CrossoverJoinedOutput;
+      public int CrossoverJoinedMinGeneration = 0;
     }
 
     private static Options ParseArgs(string[] args) {
@@ -87,6 +89,8 @@ namespace HeuristicLab.HeadlessRunner {
           case "--population-sample-output": o.PopulationSampleOutput = args[++i]; break;
           case "--population-sample-generations": o.PopulationSampleGenerations = args[++i]; break;
           case "--mutation-trace-output": o.MutationTraceOutput = args[++i]; break;
+          case "--crossover-joined-output": o.CrossoverJoinedOutput = args[++i]; break;
+          case "--crossover-joined-min-generation": o.CrossoverJoinedMinGeneration = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
           default:
             Console.Error.WriteLine("Unknown argument: " + args[i]);
             return null;
@@ -622,6 +626,12 @@ namespace HeuristicLab.HeadlessRunner {
       // check (does donor tree size correlate with the excised donor branch size).
       if (o.CrossoverDonorOutput != null)
         SubtreeCrossover.DonorLog = new List<Tuple<int, int>>();
+      // Same instrumentation family: (parent0 length, removed length, parent1/donor length,
+      // inserted length) for BOTH sides of every Cross() call in one row -- unlike KernelLog/
+      // DonorLog, which need reconstructing via NoOpLog to join correctly since the donor CSV
+      // writer skips no-op rows. insertedLength = -1 for no-ops.
+      if (o.CrossoverJoinedOutput != null)
+        SubtreeCrossover.JoinedLog = new List<Tuple<int, int, int, int>>();
 
       // Read back from the live algorithm object right before Start() -- not the intended
       // config value -- so a silent fallback-to-default or a parse failure earlier would show up here.
@@ -802,6 +812,35 @@ namespace HeuristicLab.HeadlessRunner {
           }
         }
         Console.WriteLine($"[verify] crossover donor events logged = {donorLog.Count - noopSkipped} (of {donorLog.Count} total calls, {noopSkipped} were no-ops and skipped; expected {callsPerGeneration} x {ga.MaximumGenerations.Value} generations = {callsPerGeneration * ga.MaximumGenerations.Value} total calls)");
+      }
+
+      if (o.CrossoverJoinedOutput != null) {
+        // Both excision and donor side in one row per call, always (including no-ops, with
+        // inserted_length=-1) -- avoids the join-via-NoOpLog reconstruction --crossover-kernel-output
+        // / --crossover-donor-output need when both sides are wanted together. Filtered to
+        // generation >= CrossoverJoinedMinGeneration (skip the burn-in transient) since this is
+        // typically used for equilibrium-region kernel dumps over many generations.
+        int callsPerGeneration = ga.PopulationSize.Value - ga.Elites.Value;
+        var joinedLog = SubtreeCrossover.JoinedLog;
+        bool writeJoinedHeader = !File.Exists(o.CrossoverJoinedOutput);
+        int written = 0;
+        using (var jw = new StreamWriter(o.CrossoverJoinedOutput, append: true)) {
+          if (writeJoinedHeader)
+            jw.WriteLine("problem,noise,variant,seed,generation,parent_length,removed_length,donor_length,inserted_length");
+          for (int i = 0; i < joinedLog.Count; i++) {
+            int generation = i / callsPerGeneration;
+            if (generation < o.CrossoverJoinedMinGeneration) continue;
+            jw.WriteLine(string.Join(",",
+              o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
+              generation.ToString(CultureInfo.InvariantCulture),
+              joinedLog[i].Item1.ToString(CultureInfo.InvariantCulture),
+              joinedLog[i].Item2.ToString(CultureInfo.InvariantCulture),
+              joinedLog[i].Item3.ToString(CultureInfo.InvariantCulture),
+              joinedLog[i].Item4.ToString(CultureInfo.InvariantCulture)));
+            written++;
+          }
+        }
+        Console.WriteLine($"[verify] crossover joined events logged = {written} (of {joinedLog.Count} total calls, filtered to generation >= {o.CrossoverJoinedMinGeneration})");
       }
 
       if (o.PopulationSampleOutput != null) {

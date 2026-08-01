@@ -112,6 +112,18 @@ this into batch-run time estimates.
   correlates with the donor branch it contributes (operon's own
   reinserter shows ~zero correlation there). **Requires the
   instrumentation patch** — see `patches/` below.
+- `--crossover-joined-output <csv> [--crossover-joined-min-generation <n>]`
+  — export one row per `SubtreeCrossover.Cross()` call (`problem, noise,
+  variant, seed, generation, parent_length, removed_length,
+  donor_length, inserted_length`) with **both** the excision and donor
+  side together in the same row, always (including no-ops, with
+  `inserted_length=-1` — unlike `--crossover-donor-output`, no rows are
+  filtered out, so there's no need to reconstruct alignment via
+  `--crossover-noop-output` when both sides are wanted jointly).
+  `--crossover-joined-min-generation` filters to `generation >= n`
+  (default 0), for skipping the burn-in transient on equilibrium-region
+  kernel dumps over many generations. **Requires the instrumentation
+  patch** — see `patches/` below.
 - `HL_EVAL_FREE=1` — swap in `PlaceholderEvaluator` (see
   `PlaceholderEvaluator.cs`) instead of the real GP/GPC evaluator: skips
   the LM constant-optimization / real fitness computation entirely,
