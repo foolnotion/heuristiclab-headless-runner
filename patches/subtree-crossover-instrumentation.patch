@@ -1,8 +1,8 @@
 diff --git a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs
-index a7d316e88..68dade090 100644
+index a7d316e88..6395662ea 100644
 --- a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs
 +++ b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs
-@@ -107,17 +107,58 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+@@ -107,17 +107,70 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
          MaximumSymbolicExpressionTreeLength.Value, MaximumSymbolicExpressionTreeDepth.Value);
      }
  
@@ -39,8 +39,20 @@ index a7d316e88..68dade090 100644
 +      public int InternalArity1CandidatesExcision, InternalArity2CandidatesExcision;
 +      public int InternalCandidatesDonor, LeafCandidatesDonor; // -1 if not computed (no-op: SelectRandomBranch never called)
 +      public int InternalArity1CandidatesDonor, InternalArity2CandidatesDonor;
++      // parent1's OWN whole-tree terminal count, unfiltered by budget/IsMatchingPointType -- the
++      // ground-truth ArityDiagnosticEvent.terminal count against which InternalCandidatesDonor's own
++      // composition can be compared, to test whether the candidate-pool filter itself (specifically
++      // IsMatchingPointType, since budget filtering is a no-op under unbound settings) discriminates
++      // by arity relative to parent1's true composition.
++      public int DonorTreeTerminalCount;
 +    }
 +    public static List<ArityDiagnosticEvent> ArityDiagnosticLog = null;
++
++    private static int CountTerminals(ISymbolicExpressionTree tree) {
++      int count = 0;
++      tree.Root.ForEachNodePostfix((n) => { if (n.SubtreeCount == 0) count++; });
++      return count;
++    }
 +
      public static ISymbolicExpressionTree Cross(IRandom random,
        ISymbolicExpressionTree parent0, ISymbolicExpressionTree parent1,
@@ -64,9 +76,12 @@ index a7d316e88..68dade090 100644
        int maxInsertedBranchLength = Math.Max(0, maxTreeLength - (parent0.Length - childLength));
        int maxInsertedBranchDepth = Math.Max(0, maxTreeDepth - parent0.Root.GetBranchLevel(crossoverPoint0.Parent));
  
-@@ -131,11 +172,37 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+@@ -130,12 +183,42 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+       // empty branch
        if (crossoverPoint0.IsMatchingPointType(null)) allowedBranches.Add(null);
  
++      int donorTreeTerminalCount = ArityDiagnosticLog != null ? CountTerminals(parent1) : -1;
++
        if (allowedBranches.Count == 0) {
 +        if (NoOpLog != null) NoOpLog.Add(Tuple.Create(parent0LengthBefore, true));
 +        if (DonorLog != null) DonorLog.Add(Tuple.Create(-1, -1));
@@ -76,7 +91,8 @@ index a7d316e88..68dade090 100644
 +          ParentDepth = parent0.Depth, DonorDepth = parent1.Depth, RemovedArity = removedArity, InsertedArity = -1,
 +          InternalCandidatesExcision = internalCandidatesExcision, LeafCandidatesExcision = leafCandidatesExcision,
 +          InternalArity1CandidatesExcision = internalArity1CandidatesExcision, InternalArity2CandidatesExcision = internalArity2CandidatesExcision,
-+          InternalCandidatesDonor = -1, LeafCandidatesDonor = -1, InternalArity1CandidatesDonor = -1, InternalArity2CandidatesDonor = -1
++          InternalCandidatesDonor = -1, LeafCandidatesDonor = -1, InternalArity1CandidatesDonor = -1, InternalArity2CandidatesDonor = -1,
++          DonorTreeTerminalCount = donorTreeTerminalCount
 +        });
          return parent0;
        } else {
@@ -98,12 +114,13 @@ index a7d316e88..68dade090 100644
 +          InternalCandidatesExcision = internalCandidatesExcision, LeafCandidatesExcision = leafCandidatesExcision,
 +          InternalArity1CandidatesExcision = internalArity1CandidatesExcision, InternalArity2CandidatesExcision = internalArity2CandidatesExcision,
 +          InternalCandidatesDonor = internalCandidatesDonor, LeafCandidatesDonor = leafCandidatesDonor,
-+          InternalArity1CandidatesDonor = internalArity1CandidatesDonor, InternalArity2CandidatesDonor = internalArity2CandidatesDonor
++          InternalArity1CandidatesDonor = internalArity1CandidatesDonor, InternalArity2CandidatesDonor = internalArity2CandidatesDonor,
++          DonorTreeTerminalCount = donorTreeTerminalCount
 +        });
  
          if (crossoverPoint0.Child != null) {
            // manipulate the tree of parent0 in place
-@@ -154,7 +221,8 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+@@ -154,7 +237,8 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
        }
      }
  
@@ -113,7 +130,7 @@ index a7d316e88..68dade090 100644
        if (internalNodeProbability < 0.0 || internalNodeProbability > 1.0) throw new ArgumentException("internalNodeProbability");
        List<CutPoint> internalCrossoverPoints = new List<CutPoint>();
        List<CutPoint> leafCrossoverPoints = new List<CutPoint>();
-@@ -181,6 +249,16 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+@@ -181,6 +265,16 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
        }
      );
  
@@ -130,7 +147,7 @@ index a7d316e88..68dade090 100644
        if (random.NextDouble() < internalNodeProbability) {
          // select from internal node if possible
          if (internalCrossoverPoints.Count > 0) {
-@@ -199,38 +277,39 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+@@ -199,38 +293,39 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
        }
      }
  

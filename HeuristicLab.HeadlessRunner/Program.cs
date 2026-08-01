@@ -864,7 +864,7 @@ namespace HeuristicLab.HeadlessRunner {
           if (writeArityHeader)
             aw.WriteLine("problem,noise,variant,seed,generation,parent_length,removed_length,donor_length,inserted_length,parent_depth,donor_depth,"
               + "removed_arity,inserted_arity,internal_candidates_excision,leaf_candidates_excision,internal_arity1_candidates_excision,internal_arity2_candidates_excision,"
-              + "internal_candidates_donor,leaf_candidates_donor,internal_arity1_candidates_donor,internal_arity2_candidates_donor");
+              + "internal_candidates_donor,leaf_candidates_donor,internal_arity1_candidates_donor,internal_arity2_candidates_donor,donor_tree_terminal_count");
           for (int i = 0; i < arityLog.Count; i++) {
             int generation = i / callsPerGeneration;
             if (generation < o.CrossoverArityDiagnosticMinGeneration) continue;
@@ -887,7 +887,8 @@ namespace HeuristicLab.HeadlessRunner {
               e.InternalCandidatesDonor.ToString(CultureInfo.InvariantCulture),
               e.LeafCandidatesDonor.ToString(CultureInfo.InvariantCulture),
               e.InternalArity1CandidatesDonor.ToString(CultureInfo.InvariantCulture),
-              e.InternalArity2CandidatesDonor.ToString(CultureInfo.InvariantCulture)));
+              e.InternalArity2CandidatesDonor.ToString(CultureInfo.InvariantCulture),
+              e.DonorTreeTerminalCount.ToString(CultureInfo.InvariantCulture)));
             written++;
           }
         }
