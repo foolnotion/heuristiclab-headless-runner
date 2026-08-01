@@ -1,8 +1,8 @@
 diff --git a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs
-index a7d316e88..5c44acf38 100644
+index a7d316e88..ffe5f54d3 100644
 --- a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs
 +++ b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Crossovers/SubtreeCrossover.cs
-@@ -107,17 +107,36 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+@@ -107,17 +107,39 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
          MaximumSymbolicExpressionTreeLength.Value, MaximumSymbolicExpressionTreeDepth.Value);
      }
  
@@ -16,12 +16,15 @@ index a7d316e88..5c44acf38 100644
 +    public static List<Tuple<int, bool>> NoOpLog = null;
 +    public static List<Tuple<int, int>> KernelLog = null;
 +    public static List<Tuple<int, int>> DonorLog = null;
-+    // JoinedLog: (parent0.Length, removed-subtree length, parent1.Length, inserted-branch length)
-+    // for every Cross() call in one row, both excision and donor side together, unlike
-+    // KernelLog/DonorLog which need reconstructing via NoOpLog to join correctly (donor CSV
-+    // writer skips no-op rows). insertedLength = -1 for no-ops (parent1.Length is still known
-+    // and logged even then, since parent1 is already selected before the donor-branch search).
-+    public static List<Tuple<int, int, int, int>> JoinedLog = null;
++    // JoinedLog: (parent0.Length, removed-subtree length, parent1.Length, inserted-branch length,
++    // parent0.Depth, parent1.Depth) for every Cross() call in one row, both excision and donor
++    // side together, unlike KernelLog/DonorLog which need reconstructing via NoOpLog to join
++    // correctly (donor CSV writer skips no-op rows). insertedLength = -1 for no-ops (parent1.Length/
++    // Depth are still known and logged even then, since parent1 is already selected before the
++    // donor-branch search). parent0.Depth/parent1.Depth are the whole tree's own Depth (wrapper-
++    // inclusive, same convention as raw_depth elsewhere in this harness) at the moment of the call,
++    // for testing whether tree shape (length-vs-depth) explains the removed/L ratio's decay.
++    public static List<Tuple<int, int, int, int, int, int>> JoinedLog = null;
 +
      public static ISymbolicExpressionTree Cross(IRandom random,
        ISymbolicExpressionTree parent0, ISymbolicExpressionTree parent1,
@@ -41,13 +44,13 @@ index a7d316e88..5c44acf38 100644
        int maxInsertedBranchLength = Math.Max(0, maxTreeLength - (parent0.Length - childLength));
        int maxInsertedBranchDepth = Math.Max(0, maxTreeDepth - parent0.Root.GetBranchLevel(crossoverPoint0.Parent));
  
-@@ -131,11 +150,19 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+@@ -131,11 +153,19 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
        if (crossoverPoint0.IsMatchingPointType(null)) allowedBranches.Add(null);
  
        if (allowedBranches.Count == 0) {
 +        if (NoOpLog != null) NoOpLog.Add(Tuple.Create(parent0LengthBefore, true));
 +        if (DonorLog != null) DonorLog.Add(Tuple.Create(-1, -1));
-+        if (JoinedLog != null) JoinedLog.Add(Tuple.Create(parent0LengthBefore, childLength, parent1.Length, -1));
++        if (JoinedLog != null) JoinedLog.Add(Tuple.Create(parent0LengthBefore, childLength, parent1.Length, -1, parent0.Depth, parent1.Depth));
          return parent0;
        } else {
 +        if (NoOpLog != null) NoOpLog.Add(Tuple.Create(parent0LengthBefore, false));
@@ -57,7 +60,7 @@ index a7d316e88..5c44acf38 100644
 +        int insertedLength = selectedBranch != null ? selectedBranch.GetLength() : 0;
 +        if (DonorLog != null)
 +          DonorLog.Add(Tuple.Create(parent1.Length, insertedLength));
-+        if (JoinedLog != null) JoinedLog.Add(Tuple.Create(parent0LengthBefore, childLength, parent1.Length, insertedLength));
++        if (JoinedLog != null) JoinedLog.Add(Tuple.Create(parent0LengthBefore, childLength, parent1.Length, insertedLength, parent0.Depth, parent1.Depth));
  
          if (crossoverPoint0.Child != null) {
            // manipulate the tree of parent0 in place

@@ -631,7 +631,7 @@ namespace HeuristicLab.HeadlessRunner {
       // DonorLog, which need reconstructing via NoOpLog to join correctly since the donor CSV
       // writer skips no-op rows. insertedLength = -1 for no-ops.
       if (o.CrossoverJoinedOutput != null)
-        SubtreeCrossover.JoinedLog = new List<Tuple<int, int, int, int>>();
+        SubtreeCrossover.JoinedLog = new List<Tuple<int, int, int, int, int, int>>();
 
       // Read back from the live algorithm object right before Start() -- not the intended
       // config value -- so a silent fallback-to-default or a parse failure earlier would show up here.
@@ -826,7 +826,7 @@ namespace HeuristicLab.HeadlessRunner {
         int written = 0;
         using (var jw = new StreamWriter(o.CrossoverJoinedOutput, append: true)) {
           if (writeJoinedHeader)
-            jw.WriteLine("problem,noise,variant,seed,generation,parent_length,removed_length,donor_length,inserted_length");
+            jw.WriteLine("problem,noise,variant,seed,generation,parent_length,removed_length,donor_length,inserted_length,parent_depth,donor_depth");
           for (int i = 0; i < joinedLog.Count; i++) {
             int generation = i / callsPerGeneration;
             if (generation < o.CrossoverJoinedMinGeneration) continue;
@@ -836,7 +836,9 @@ namespace HeuristicLab.HeadlessRunner {
               joinedLog[i].Item1.ToString(CultureInfo.InvariantCulture),
               joinedLog[i].Item2.ToString(CultureInfo.InvariantCulture),
               joinedLog[i].Item3.ToString(CultureInfo.InvariantCulture),
-              joinedLog[i].Item4.ToString(CultureInfo.InvariantCulture)));
+              joinedLog[i].Item4.ToString(CultureInfo.InvariantCulture),
+              joinedLog[i].Item5.ToString(CultureInfo.InvariantCulture),
+              joinedLog[i].Item6.ToString(CultureInfo.InvariantCulture)));
             written++;
           }
         }

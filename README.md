@@ -124,11 +124,16 @@ this into batch-run time estimates.
 - `--crossover-joined-output <csv> [--crossover-joined-min-generation <n>]`
   — export one row per `SubtreeCrossover.Cross()` call (`problem, noise,
   variant, seed, generation, parent_length, removed_length,
-  donor_length, inserted_length`) with **both** the excision and donor
-  side together in the same row, always (including no-ops, with
-  `inserted_length=-1` — unlike `--crossover-donor-output`, no rows are
-  filtered out, so there's no need to reconstruct alignment via
-  `--crossover-noop-output` when both sides are wanted jointly).
+  donor_length, inserted_length, parent_depth, donor_depth`) with
+  **both** the excision and donor side together in the same row, always
+  (including no-ops, with `inserted_length=-1` — unlike
+  `--crossover-donor-output`, no rows are filtered out, so there's no
+  need to reconstruct alignment via `--crossover-noop-output` when both
+  sides are wanted jointly). `parent_depth`/`donor_depth` are
+  `parent0.Depth`/`parent1.Depth` (whole-tree, wrapper-inclusive, same
+  convention as `raw_depth` elsewhere) at the moment of the call, added
+  for testing whether tree shape (length-vs-depth) explains the
+  removed/L ratio's decay under the unbound ablation.
   `--crossover-joined-min-generation` filters to `generation >= n`
   (default 0), for skipping the burn-in transient on equilibrium-region
   kernel dumps over many generations. **Requires the instrumentation
