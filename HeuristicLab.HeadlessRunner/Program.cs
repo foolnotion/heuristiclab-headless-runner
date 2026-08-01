@@ -506,8 +506,8 @@ namespace HeuristicLab.HeadlessRunner {
         ? (HeuristicLab.Problems.DataAnalysis.Symbolic.ISymbolicDataAnalysisExpressionTreeInterpreter)new SymbolicDataAnalysisExpressionTreeLinearInterpreter()
         : new HeuristicLab.Problems.DataAnalysis.Symbolic.NativeInterpreter();
       problem.SymbolicExpressionTreeGrammar = grammar;
-      problem.MaximumSymbolicExpressionTreeLength.Value = 50;
-      problem.MaximumSymbolicExpressionTreeDepth.Value = 20;
+      problem.MaximumSymbolicExpressionTreeLength.Value = Environment.GetEnvironmentVariable("HL_MAXLENGTH") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_MAXLENGTH"), CultureInfo.InvariantCulture) : 50;
+      problem.MaximumSymbolicExpressionTreeDepth.Value = Environment.GetEnvironmentVariable("HL_MAXDEPTH") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_MAXDEPTH"), CultureInfo.InvariantCulture) : 20;
 
       var ga = new GeneticAlgorithm { Problem = problem };
       ga.Seed.Value = o.Seed;

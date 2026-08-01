@@ -72,6 +72,15 @@ this into batch-run time estimates.
 - `HL_GENS` — max generations (default 20 for GPC, 200 for GP)
 - `HL_MUTATION_PROB` — mutation probability (default 0.15; set to `0`
   for a crossover-only ablation)
+- `HL_MAXLENGTH` / `HL_MAXDEPTH` — override
+  `MaximumSymbolicExpressionTreeLength`/`MaximumSymbolicExpressionTreeDepth`
+  (defaults 50/20). Set far above anything the population could reach
+  (e.g. `100000`/`1000`) for a donor-side-budget-unbound ablation,
+  mirroring Operon's `--maxlength`/`--maxdepth` unbound sweep — these
+  feed directly into `SubtreeCrossover`'s `maxInsertedBranchLength`/
+  `maxInsertedBranchDepth` donor-branch-selection gate (see
+  `SubtreeCrossover.cs:121`/`:122`), not just the initial-population
+  PTC2 budget.
 - `HL_ELITES` — number of individuals `BestSelector` carries forward
   unconditionally each generation (default 1). Set to `0` to disable
   elitism entirely — every generation's whole population, including
