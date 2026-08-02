@@ -1,0 +1,82 @@
+diff --git a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Creators/ProbabilisticTreeCreator.cs b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Creators/ProbabilisticTreeCreator.cs
+index 7677725..a6e0656 100644
+--- a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Creators/ProbabilisticTreeCreator.cs
++++ b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Creators/ProbabilisticTreeCreator.cs
+@@ -35,6 +35,18 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+     ISymbolicExpressionTreeSizeConstraintOperator, ISymbolicExpressionTreeGrammarBasedOperator {
+     private const int MAX_TRIES = 100;
+ 
++    // Temporary investigation instrumentation, local-only, not for upstream. Null unless
++    // explicitly assigned by the harness.
++    // TargetLengthLog: the drawn targetTreeLength for each PTC2(seedNode, maxLength, maxDepth) call.
++    public static List<int> TargetLengthLog;
++    // ExtensionChoiceLog: true if a genuinely-competed (weighted, not forced-minimal)
++    // extension-point choice picked a terminal symbol, false if it picked a function.
++    public static List<bool> ExtensionChoiceLog;
++    // ForcedFillLog: count of ReplaceWithMinimalTree invocations per top-level PTC2 call
++    // (depth-exceeded or leftover-extension-point forced fills -- not part of the weighted
++    // competition, tracked separately so they aren't conflated with genuine choices).
++    public static int ForcedFillCount;
++
+     [StorableConstructor]
+     protected ProbabilisticTreeCreator(StorableConstructorFlag _) : base(_) { }
+     protected ProbabilisticTreeCreator(ProbabilisticTreeCreator original, Cloner cloner) : base(original, cloner) { }
+@@ -111,6 +123,7 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+         // select a target tree length uniformly in the possible range (as determined by explicit limits and limits of the grammar)
+         int targetTreeLength;
+         targetTreeLength = random.Next(allowedMinLength, allowedMaxLength + 1);
++        if (TargetLengthLog != null) TargetLengthLog.Add(targetTreeLength);
+         if (targetTreeLength <= 1 || maxDepth <= 1) return;
+ 
+         bool success = TryCreateFullTreeFromSeed(random, seedNode, targetTreeLength - 1, maxDepth - 1);
+@@ -184,6 +197,12 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+           var selectedSymbol = allowedSymbols.SelectRandom(weights, random);
+ #pragma warning restore 612, 618
+ 
++          if (ExtensionChoiceLog != null) {
++            bool isTerminal = parent.Grammar.GetMinimumSubtreeCount(selectedSymbol) == 0 &&
++                               parent.Grammar.GetMaximumSubtreeCount(selectedSymbol) == 0;
++            ExtensionChoiceLog.Add(isTerminal);
++          }
++
+           ISymbolicExpressionTreeNode newTree = selectedSymbol.CreateTreeNode();
+           if (newTree.HasLocalParameters) newTree.ResetLocalParameters(random);
+           parent.RemoveSubtree(argumentIndex);
+@@ -222,6 +241,7 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+ 
+     private static void ReplaceWithMinimalTree(IRandom random, ISymbolicExpressionTreeNode root, ISymbolicExpressionTreeNode parent,
+       int childIndex) {
++      ForcedFillCount++;
+       // determine possible symbols that will lead to the smallest possible tree
+       var possibleSymbols = (from s in parent.Grammar.GetAllowedChildSymbols(parent.Symbol, childIndex)
+                              where s.InitialFrequency > 0.0
+diff --git a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Manipulators/ReplaceBranchManipulation.cs b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Manipulators/ReplaceBranchManipulation.cs
+index b194900..68f96b2 100644
+--- a/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Manipulators/ReplaceBranchManipulation.cs
++++ b/HeuristicLab.Encodings.SymbolicExpressionTreeEncoding/3.4/Manipulators/ReplaceBranchManipulation.cs
+@@ -31,6 +31,11 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+   [StorableType("92286134-0520-4A1E-B8EE-01AFAD55C3AE")]
+   [Item("ReplaceBranchManipulation", "Selects a branch of the tree randomly and replaces it with a newly initialized branch (using PTC2).")]
+   public sealed class ReplaceBranchManipulation : SymbolicExpressionTreeManipulator, ISymbolicExpressionTreeSizeConstraintOperator {
++    // Temporary investigation instrumentation: (isTerminalRoot, maxLengthBudget, maxDepthBudget,
++    // finalRealizedLength). Local-only field, not for upstream. Null unless explicitly assigned
++    // by the harness.
++    public static List<System.Tuple<bool, int, int, int>> RootPickLog;
++
+     private const int MAX_TRIES = 100;
+     private const string MaximumSymbolicExpressionTreeLengthParameterName = "MaximumSymbolicExpressionTreeLength";
+     private const string MaximumSymbolicExpressionTreeDepthParameterName = "MaximumSymbolicExpressionTreeDepth";
+@@ -113,6 +118,13 @@ namespace HeuristicLab.Encodings.SymbolicExpressionTreeEncoding {
+         parent.RemoveSubtree(childIndex);
+         parent.InsertSubtree(childIndex, seedNode);
+         ProbabilisticTreeCreator.PTC2(random, seedNode, maxLength, maxDepth);
++
++        if (RootPickLog != null) {
++          bool isTerminalRoot = parent.Grammar.GetMinimumSubtreeCount(seedSymbol) == 0 &&
++                                 parent.Grammar.GetMaximumSubtreeCount(seedSymbol) == 0;
++          int finalLength = parent.GetSubtree(childIndex).GetLength();
++          RootPickLog.Add(System.Tuple.Create(isTerminalRoot, maxLength, maxDepth, finalLength));
++        }
+       }
+     }
+   }
