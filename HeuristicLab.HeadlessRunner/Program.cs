@@ -69,6 +69,7 @@ namespace HeuristicLab.HeadlessRunner {
       public string CrossoverArityDiagnosticOutput;
       public int CrossoverArityDiagnosticMinGeneration = 0;
       public string CrossoverMatchDiagnosticOutput;
+      public string ReplaceBranchDiagnosticOutput;
     }
 
     private static Options ParseArgs(string[] args) {
@@ -97,6 +98,7 @@ namespace HeuristicLab.HeadlessRunner {
           case "--crossover-arity-diagnostic-output": o.CrossoverArityDiagnosticOutput = args[++i]; break;
           case "--crossover-arity-diagnostic-min-generation": o.CrossoverArityDiagnosticMinGeneration = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
           case "--crossover-match-diagnostic-output": o.CrossoverMatchDiagnosticOutput = args[++i]; break;
+          case "--replace-branch-diagnostic-output": o.ReplaceBranchDiagnosticOutput = args[++i]; break;
           default:
             Console.Error.WriteLine("Unknown argument: " + args[i]);
             return null;
@@ -697,6 +699,19 @@ namespace HeuristicLab.HeadlessRunner {
         || o.CrossoverJoinedOutput != null || o.CrossoverArityDiagnosticOutput != null || o.CrossoverMatchDiagnosticOutput != null)
         throw new InvalidOperationException("Crossover diagnostic outputs require the HeuristicLab instrumentation patch.");
 #endif
+      // Real empirical ground truth for the replacesubtree/ReplaceBranchManipulation mechanism
+      // investigation: (isTerminalRoot, maxLengthBudget, maxDepthBudget, finalRealizedLength) per
+      // ReplaceRandomBranch call, plus the drawn PTC2 target length and every genuinely-competed
+      // (not forced-minimal) extension-point choice's terminal/function outcome, so the actual
+      // empirical terminal-seed rate can be measured directly instead of assumed from symbol counts.
+      // Not gated by HL_INSTRUMENTED -- these fields are always present on this checkout (added
+      // directly, not via the shared subtree-crossover-instrumentation.patch).
+      if (o.ReplaceBranchDiagnosticOutput != null) {
+        ReplaceBranchManipulation.RootPickLog = new List<Tuple<bool, int, int, int>>();
+        ProbabilisticTreeCreator.TargetLengthLog = new List<int>();
+        ProbabilisticTreeCreator.ExtensionChoiceLog = new List<bool>();
+        ProbabilisticTreeCreator.ForcedFillCount = 0;
+      }
 
       // Read back from the live algorithm object right before Start() -- not the intended
       // config value -- so a silent fallback-to-default or a parse failure earlier would show up here.
@@ -973,6 +988,50 @@ namespace HeuristicLab.HeadlessRunner {
         Console.WriteLine($"[verify] crossover match-diagnostic events logged (arity-1 candidates only) = {matchLog.Count}");
       }
 #endif
+
+      if (o.ReplaceBranchDiagnosticOutput != null) {
+        var rootLog = ReplaceBranchManipulation.RootPickLog;
+        string rootPath = o.ReplaceBranchDiagnosticOutput + "_root.csv";
+        bool writeRootHeader = !File.Exists(rootPath);
+        using (var rw = new StreamWriter(rootPath, append: true)) {
+          if (writeRootHeader)
+            rw.WriteLine("problem,noise,variant,seed,is_terminal_root,max_length_budget,max_depth_budget,final_realized_length");
+          foreach (var e in rootLog) {
+            rw.WriteLine(string.Join(",",
+              o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
+              e.Item1.ToString(), e.Item2.ToString(CultureInfo.InvariantCulture),
+              e.Item3.ToString(CultureInfo.InvariantCulture), e.Item4.ToString(CultureInfo.InvariantCulture)));
+          }
+        }
+
+        var targetLog = ProbabilisticTreeCreator.TargetLengthLog;
+        string targetPath = o.ReplaceBranchDiagnosticOutput + "_targetlen.csv";
+        bool writeTargetHeader = !File.Exists(targetPath);
+        using (var tw = new StreamWriter(targetPath, append: true)) {
+          if (writeTargetHeader)
+            tw.WriteLine("problem,noise,variant,seed,target_tree_length");
+          foreach (var v in targetLog) {
+            tw.WriteLine(string.Join(",",
+              o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
+              v.ToString(CultureInfo.InvariantCulture)));
+          }
+        }
+
+        var extLog = ProbabilisticTreeCreator.ExtensionChoiceLog;
+        string extPath = o.ReplaceBranchDiagnosticOutput + "_extensionchoice.csv";
+        bool writeExtHeader = !File.Exists(extPath);
+        using (var ew = new StreamWriter(extPath, append: true)) {
+          if (writeExtHeader)
+            ew.WriteLine("problem,noise,variant,seed,is_terminal_choice");
+          foreach (var b in extLog) {
+            ew.WriteLine(string.Join(",",
+              o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture), b.ToString()));
+          }
+        }
+
+        Console.WriteLine($"[verify] replace-branch diagnostic: root picks={rootLog.Count}, target-length draws={targetLog.Count}, "
+          + $"extension choices={extLog.Count}, forced minimal-tree fills={ProbabilisticTreeCreator.ForcedFillCount}");
+      }
 
       if (o.PopulationSampleOutput != null) {
         var sampleLog = PopulationSampleAnalyzer.Log;
