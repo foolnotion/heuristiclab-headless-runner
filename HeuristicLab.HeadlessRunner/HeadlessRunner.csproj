@@ -41,6 +41,7 @@
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.Web.Extensions" />
 
     <Reference Include="HeuristicLab.Common-3.3">
       <HintPath>..\bin\HeuristicLab.Common-3.3.dll</HintPath>
@@ -106,6 +107,10 @@
       <HintPath>..\bin\HeuristicLab.Algorithms.GeneticAlgorithm-3.3.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="HeuristicLab.Algorithms.OffspringSelectionGeneticAlgorithm-3.3">
+      <HintPath>..\bin\HeuristicLab.Algorithms.OffspringSelectionGeneticAlgorithm-3.3.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
     <Reference Include="HeuristicLab.Encodings.SymbolicExpressionTreeEncoding-3.4">
       <HintPath>..\bin\HeuristicLab.Encodings.SymbolicExpressionTreeEncoding-3.4.dll</HintPath>
       <Private>true</Private>
@@ -159,6 +164,8 @@
     <Compile Include="Program.cs" />
     <Compile Include="PlaceholderEvaluator.cs" />
     <Compile Include="PopulationSampleAnalyzer.cs" />
+    <Compile Include="ConstraintDiagnosticsAnalyzer.cs" />
+    <Compile Include="ShapeDynamicsAnalyzer.cs" />
     <Compile Include="ScaledParameterOptimizationEvaluator.cs" />
     <Compile Include="PurgeDegenerateAnalyzer.cs" />
     <Compile Include="PostfixTreeParser.cs" />

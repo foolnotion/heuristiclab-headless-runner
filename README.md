@@ -68,6 +68,29 @@ this into batch-run time estimates.
 
 ## Runtime env overrides (HeuristicLab.HeadlessRunner)
 
+### Shape-constrained GP
+
+The runner can execute HeuristicLab's upstream single-objective
+`NMSESingleObjectiveConstraintsEvaluator` under Mono. It uses the upstream
+interval-arithmetic bound estimator and accepts the shared JSON shape-config
+format used by the Operon reproduction.
+
+- `--shape-constraints-config <json>` — enables the upstream constrained GP
+  evaluator. The runner selects `LinearScalingGrammar`, required because the
+  evaluator writes fitted scale/offset values into its dedicated root nodes.
+- `--shape-soft-constraints` — selects upstream soft scoring; otherwise the
+  upstream hard gate returns NMSE `1.0` when any constraint is violated or
+  cannot be bounded.
+- `--shape-penalty-factor <x>` — upstream soft-mode penalty multiplier.
+- `--shape-dynamics-output <csv>` — writes one generation-end population
+  snapshot with certified-feasible, certified-infeasible, and uncertified
+  counts; violation sum; and feasibility-stratified length/depth means.
+  These are end-of-generation snapshots, not parent-to-offspring transition
+  counts.
+- `--constraint-diagnostics-output <csv>` — diagnostic-only per-tree
+  recomputation of the upstream constraint score and violations. It is useful
+  for validating an experiment setup and should not be enabled in full sweeps.
+
 - `HL_POPSIZE` — population size (default 1000)
 - `HL_GENS` — max generations (default 20 for GPC, 200 for GP)
 - `HL_MUTATION_PROB` — mutation probability (default 0.15; set to `0`

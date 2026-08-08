@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Collections;
 using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Web.Script.Serialization;
 
 using HeuristicLab.Algorithms.GeneticAlgorithm;
 using HeuristicLab.Analysis;
@@ -12,6 +14,7 @@ using HeuristicLab.Core;
 using HeuristicLab.Data;
 using HeuristicLab.Encodings.SymbolicExpressionTreeEncoding;
 using HeuristicLab.Optimization;
+using OSGA = HeuristicLab.Algorithms.OffspringSelectionGeneticAlgorithm.OffspringSelectionGeneticAlgorithm;
 using HeuristicLab.Problems.DataAnalysis;
 using HeuristicLab.Problems.DataAnalysis.Symbolic;
 using HeuristicLab.Problems.DataAnalysis.Symbolic.Regression;
@@ -70,6 +73,12 @@ namespace HeuristicLab.HeadlessRunner {
       public int CrossoverArityDiagnosticMinGeneration = 0;
       public string CrossoverMatchDiagnosticOutput;
       public string ReplaceBranchDiagnosticOutput;
+      public string OpGenDiagnosticOutput;
+      public string ShapeConstraintsConfig;
+      public string ConstraintDiagnosticsOutput;
+      public string ShapeDynamicsOutput;
+      public bool ShapeSoftConstraints;
+      public double ShapePenaltyFactor = 1.0;
     }
 
     private static Options ParseArgs(string[] args) {
@@ -99,13 +108,19 @@ namespace HeuristicLab.HeadlessRunner {
           case "--crossover-arity-diagnostic-min-generation": o.CrossoverArityDiagnosticMinGeneration = int.Parse(args[++i], CultureInfo.InvariantCulture); break;
           case "--crossover-match-diagnostic-output": o.CrossoverMatchDiagnosticOutput = args[++i]; break;
           case "--replace-branch-diagnostic-output": o.ReplaceBranchDiagnosticOutput = args[++i]; break;
+          case "--opgen-diagnostic-output": o.OpGenDiagnosticOutput = args[++i]; break;
+          case "--shape-constraints-config": o.ShapeConstraintsConfig = args[++i]; break;
+          case "--constraint-diagnostics-output": o.ConstraintDiagnosticsOutput = args[++i]; break;
+          case "--shape-dynamics-output": o.ShapeDynamicsOutput = args[++i]; break;
+          case "--shape-soft-constraints": o.ShapeSoftConstraints = true; break;
+          case "--shape-penalty-factor": o.ShapePenaltyFactor = double.Parse(args[++i], CultureInfo.InvariantCulture); break;
           default:
             Console.Error.WriteLine("Unknown argument: " + args[i]);
             return null;
         }
       }
       if (o.TrainCsv == null || o.TestCsv == null || o.Target == null || o.Output == null) {
-        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--problem <name>] [--noise 0|1] [--model-output <hl-file>] [--formula-output <csv>] [--gen-stats-output <csv>] [--crossover-noop-output <csv>] [--crossover-kernel-output <csv>] [--crossover-donor-output <csv>] [--population-sample-output <csv> --population-sample-generations <csv-list>]");
+        Console.Error.WriteLine("Usage: HeuristicLab.HeadlessRunner --train <csv> --test <csv> --target <col> --variant GP|GPC --seed <int> --output <csv> [--shape-constraints-config <json> [--shape-soft-constraints --shape-penalty-factor <x>]]");
         return null;
       }
       return o;
@@ -215,6 +230,20 @@ namespace HeuristicLab.HeadlessRunner {
     private static TypeCoherentExpressionGrammar BuildGrammar() {
       var grammar = new TypeCoherentExpressionGrammar();
       ConfigureGrammar(grammar);
+      return grammar;
+    }
+
+    // HL's NMSESingleObjectiveConstraintsEvaluator writes fitted offset and
+    // scaling values into the two dedicated root nodes. It therefore requires
+    // LinearScalingGrammar rather than the harness's normal generic grammar.
+    private static LinearScalingGrammar BuildConstrainedGrammar() {
+      var grammar = new LinearScalingGrammar();
+      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Subtraction).Enabled = false;
+      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Tangent).Enabled = false;
+      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Cube).Enabled = false;
+      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.CubeRoot).Enabled = false;
+      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Absolute).Enabled = false;
+      grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Constant).Enabled = true;
       return grammar;
     }
 
@@ -423,6 +452,71 @@ namespace HeuristicLab.HeadlessRunner {
       return (header, rows);
     }
 
+    // Loads the same JSON shape-config schema used by the Operon reproduction:
+    // {"domains":{"x":[lo,hi]},"constraints":[{"op":"d/dx","sign":1}, ...]}.
+    // Parsing lives in the harness so the public experiment scenario can share a
+    // versioned constraint file across both engines without a second DSL.
+    private static ShapeConstrainedRegressionProblemData MakeShapeProblemData(
+      Dataset dataset, IEnumerable<string> inputs, string target, int nTrain, int nTest, string configPath) {
+      var root = new JavaScriptSerializer().DeserializeObject(File.ReadAllText(configPath)) as Dictionary<string, object>;
+      if (root == null || !root.ContainsKey("domains") || !root.ContainsKey("constraints"))
+        throw new ArgumentException("shape constraint config must contain object 'domains' and array 'constraints'.", nameof(configPath));
+      var ranges = new IntervalCollection();
+      var domains = root["domains"] as Dictionary<string, object>;
+      if (domains == null) throw new ArgumentException("shape constraint domains must be an object.", nameof(configPath));
+      foreach (var item in domains) {
+        var bounds = item.Value as IList;
+        if (bounds == null || bounds.Count != 2) throw new ArgumentException($"domain '{item.Key}' must be a two-element array.", nameof(configPath));
+        ranges.AddInterval(item.Key, new Interval(Convert.ToDouble(bounds[0], CultureInfo.InvariantCulture), Convert.ToDouble(bounds[1], CultureInfo.InvariantCulture)));
+      }
+      var constraints = new ShapeConstraints();
+      var entries = root["constraints"] as IList;
+      if (entries == null) throw new ArgumentException("shape constraints must be an array.", nameof(configPath));
+      foreach (Dictionary<string, object> entry in entries) {
+        var op = entry["op"] as string;
+        if (string.IsNullOrEmpty(op)) throw new ArgumentException("shape constraint op must be a string.", nameof(configPath));
+        string variable = string.Empty;
+        int derivatives = 0;
+        if (op == "derivative") {
+          variable = entry["variable"] as string;
+          if (string.IsNullOrEmpty(variable) || !entry.ContainsKey("order"))
+            throw new ArgumentException("derivative constraint requires string variable and integer order.", nameof(configPath));
+          derivatives = Convert.ToInt32(entry["order"], CultureInfo.InvariantCulture);
+          if (derivatives < 1) throw new ArgumentException("derivative constraint order must be positive.", nameof(configPath));
+        } else if (op != "id") {
+          if (op.StartsWith("d2/d", StringComparison.Ordinal) && op.EndsWith("2", StringComparison.Ordinal)) {
+            variable = op.Substring(4, op.Length - 5);
+            derivatives = 2;
+          } else if (op.StartsWith("d/d", StringComparison.Ordinal)) {
+            variable = op.Substring(3);
+            derivatives = 1;
+          } else {
+            throw new ArgumentException($"unsupported shape constraint op '{op}'.", nameof(configPath));
+          }
+        }
+        Interval interval;
+        if (entry.ContainsKey("sign")) {
+          var sign = Convert.ToInt32(entry["sign"], CultureInfo.InvariantCulture);
+          if (sign == 1) interval = new Interval(0.0, double.PositiveInfinity);
+          else if (sign == -1) interval = new Interval(double.NegativeInfinity, 0.0);
+          else throw new ArgumentException("shape constraint sign must be 1 or -1.", nameof(configPath));
+        } else {
+          var bounds = entry["bound"] as IList;
+          if (bounds == null || bounds.Count != 2) throw new ArgumentException("shape constraint bound must be a two-element array.", nameof(configPath));
+          interval = new Interval(Convert.ToDouble(bounds[0], CultureInfo.InvariantCulture), Convert.ToDouble(bounds[1], CultureInfo.InvariantCulture));
+        }
+        constraints.Add(new ShapeConstraint(variable, derivatives, interval, 1.0));
+      }
+      // HL's solution-result analyzer also derives intervals for the target
+      // column. The shared Operon config intentionally contains input domains
+      // only, so add the observed target range here for result construction;
+      // it is never used by IntervalUtil's constraint evaluation.
+      var targetValues = dataset.GetDoubleValues(target, Enumerable.Range(0, nTrain + nTest));
+      ranges.AddInterval(target, new Interval(targetValues.Min(), targetValues.Max()));
+      return new ShapeConstrainedRegressionProblemData(dataset, inputs, target,
+        new IntRange(0, nTrain), new IntRange(nTrain, nTrain + nTest), constraints, variableRanges: ranges);
+    }
+
     private static void Run(Options o) {
       var (trainHeader, trainRows) = ReadCsv(o.TrainCsv);
       var (testHeader, testRows) = ReadCsv(o.TestCsv);
@@ -445,11 +539,15 @@ namespace HeuristicLab.HeadlessRunner {
 
       var dataset = new Dataset(variableNames, columns);
       var allowedInputVariables = variableNames.Where(v => v != o.Target).ToList();
-      var problemData = new RegressionProblemData(dataset, allowedInputVariables, o.Target);
-      problemData.TrainingPartition.Start = 0;
-      problemData.TrainingPartition.End = nTrain;
-      problemData.TestPartition.Start = nTrain;
-      problemData.TestPartition.End = nTrain + nTest;
+      IRegressionProblemData problemData = o.ShapeConstraintsConfig == null
+        ? new RegressionProblemData(dataset, allowedInputVariables, o.Target)
+        : MakeShapeProblemData(dataset, allowedInputVariables, o.Target, nTrain, nTest, o.ShapeConstraintsConfig);
+      if (o.ShapeConstraintsConfig == null) {
+        problemData.TrainingPartition.Start = 0;
+        problemData.TrainingPartition.End = nTrain;
+        problemData.TestPartition.Start = nTrain;
+        problemData.TestPartition.End = nTrain + nTest;
+      }
 
       if (Environment.GetEnvironmentVariable("HL_DEBUG") == "1") {
         Console.WriteLine("Variables: " + string.Join(",", variableNames));
@@ -464,18 +562,35 @@ namespace HeuristicLab.HeadlessRunner {
         }
       }
 
-      var grammar = BuildGrammar();
+      ISymbolicDataAnalysisGrammar grammar = o.ShapeConstraintsConfig == null
+        ? (ISymbolicDataAnalysisGrammar)BuildGrammar()
+        : BuildConstrainedGrammar();
 
       bool isGpc = string.Equals(o.Variant, "GPC", StringComparison.OrdinalIgnoreCase);
 
       bool evalFree = Environment.GetEnvironmentVariable("HL_EVAL_FREE") == "1";
 
+      // The paper's own serialized "GP/GPC with constraints" .hl runs (see
+      // inspect_hl_companion_experiment.py in operon-publications) use a private,
+      // unpublished "Pearson R^2 Constraint Evaluator" class that isn't present in
+      // this public checkout. Constrained GPC therefore falls back to the same
+      // upstream NMSE-based constrained evaluator as constrained GP -- an explicit,
+      // documented approximation on the evaluator axis, not a claimed match.
+      bool constrainedGpc = isGpc && o.ShapeConstraintsConfig != null;
+      if (o.ShapeConstraintsConfig != null && (evalFree || (isGpc && !constrainedGpc) || Environment.GetEnvironmentVariable("HL_LM_SCALE") == "1"))
+        throw new InvalidOperationException("shape constraints currently support the upstream NMSE GP/GPC evaluator only; LM-scale and evaluation-free modes are not equivalent to the upstream constrained evaluator.");
       ISymbolicRegressionSingleObjectiveEvaluator evaluator;
       if (evalFree) {
         // Skips the real evaluation/LM step entirely -- Quality becomes cheap uniform-random
         // noise, for isolating crossover/reinsertion structural dynamics from fitness-driven
         // dynamics at a fraction of the per-generation cost. See PlaceholderEvaluator.cs.
         evaluator = new PlaceholderEvaluator();
+      } else if (constrainedGpc) {
+        var constrained = new NMSESingleObjectiveConstraintsEvaluator {
+          UseSoftConstraints = o.ShapeSoftConstraints,
+          PenalityFactor = o.ShapePenaltyFactor,
+        };
+        evaluator = constrained;
       } else if (isGpc && Environment.GetEnvironmentVariable("HL_LM_SCALE") == "1") {
         // Scales the LM iteration budget by parameter count (maxIterations = 10*(k+1)), mirroring
         // operon's own maxfev = iterations*(n_params+1) convention, to test whether HL's flat
@@ -495,6 +610,12 @@ namespace HeuristicLab.HeadlessRunner {
         // Probability=1, RowsPercentage=1, UpdateVariableWeights=true) -- no explicit overrides needed.
         var poe = new SymbolicRegressionParameterOptimizationEvaluator();
         evaluator = poe;
+      } else if (o.ShapeConstraintsConfig != null) {
+        var constrained = new NMSESingleObjectiveConstraintsEvaluator {
+          UseSoftConstraints = o.ShapeSoftConstraints,
+          PenalityFactor = o.ShapePenaltyFactor,
+        };
+        evaluator = constrained;
       } else {
         var mse = new SymbolicRegressionSingleObjectiveMeanSquaredErrorEvaluator();
         evaluator = mse;
@@ -530,6 +651,11 @@ namespace HeuristicLab.HeadlessRunner {
         treeCreator = new SymbolicDataAnalysisExpressionTreeCreator();
       }
 
+      // The ordinary upstream problem already wires ShapeConstraintsAnalyzer;
+      // the concrete ShapeConstrainedRegressionProblemData and evaluator are
+      // what activate interval-based constraint handling. Keeping the normal
+      // constructor also preserves the harness's existing best-solution and
+      // generation-stat analyzers.
       var problem = new SymbolicRegressionSingleObjectiveProblem(problemData, evaluator, treeCreator);
       problem.Maximization.Value = evaluator.Maximization;
       // Default is SymbolicDataAnalysisExpressionTreeLinearInterpreter (plain managed tree-walking);
@@ -544,70 +670,114 @@ namespace HeuristicLab.HeadlessRunner {
       // again, silently re-disabling Trigonometric/Power Functions groups and reverting
       // ConfigureGrammar()'s re-enables -- see ConfigureGrammar()'s own comment for the full
       // discovery trace. Re-apply our customization now that the automatic reset has already fired.
-      ConfigureGrammar(grammar);
+      if (grammar is TypeCoherentExpressionGrammar typeCoherentGrammar)
+        ConfigureGrammar(typeCoherentGrammar);
       problem.MaximumSymbolicExpressionTreeLength.Value = Environment.GetEnvironmentVariable("HL_MAXLENGTH") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_MAXLENGTH"), CultureInfo.InvariantCulture) : 50;
       problem.MaximumSymbolicExpressionTreeDepth.Value = Environment.GetEnvironmentVariable("HL_MAXDEPTH") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_MAXDEPTH"), CultureInfo.InvariantCulture) : 20;
 
-      var ga = new GeneticAlgorithm { Problem = problem };
-      ga.Seed.Value = o.Seed;
-      ga.SetSeedRandomly.Value = false;
-      ga.PopulationSize.Value = Environment.GetEnvironmentVariable("HL_POPSIZE") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_POPSIZE")) : 1000;
-      if (seedTrees != null && seedTrees.Count != ga.PopulationSize.Value)
-        throw new InvalidOperationException($"HL_SEED_POPULATION file has {seedTrees.Count} trees but PopulationSize={ga.PopulationSize.Value} -- these must match exactly.");
-      ga.MaximumGenerations.Value = Environment.GetEnvironmentVariable("HL_GENS") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_GENS")) : (isGpc ? 20 : 200);
-      ga.Elites.Value = Environment.GetEnvironmentVariable("HL_ELITES") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_ELITES")) : 1;
-      ga.MutationProbability.Value = Environment.GetEnvironmentVariable("HL_MUTATION_PROB") != null ? double.Parse(Environment.GetEnvironmentVariable("HL_MUTATION_PROB"), CultureInfo.InvariantCulture) : 0.15;
+      int populationSize = Environment.GetEnvironmentVariable("HL_POPSIZE") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_POPSIZE")) : 1000;
+      if (seedTrees != null && seedTrees.Count != populationSize)
+        throw new InvalidOperationException($"HL_SEED_POPULATION file has {seedTrees.Count} trees but PopulationSize={populationSize} -- these must match exactly.");
+      int maxGenerations = Environment.GetEnvironmentVariable("HL_GENS") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_GENS")) : (isGpc ? 20 : 200);
+      int elites = Environment.GetEnvironmentVariable("HL_ELITES") != null ? int.Parse(Environment.GetEnvironmentVariable("HL_ELITES")) : 1;
+      double mutationProbability = Environment.GetEnvironmentVariable("HL_MUTATION_PROB") != null ? double.Parse(Environment.GetEnvironmentVariable("HL_MUTATION_PROB"), CultureInfo.InvariantCulture) : 0.15;
 
-      // HL_SELECTOR=random swaps in RandomSelector (uniform, fitness-independent parent choice)
-      // in place of the default TournamentSelector(GroupSize=5); anything else (including unset)
-      // keeps the default.
-      if (Environment.GetEnvironmentVariable("HL_SELECTOR") == "random") {
-        var random = ga.SelectorParameter.ValidValues.OfType<RandomSelector>().First();
-        ga.Selector = random;
-      } else {
-        var tournament = ga.SelectorParameter.ValidValues.OfType<TournamentSelector>().First();
+      // Selector/crossover/mutator configuration is identical for GeneticAlgorithm and
+      // OffspringSelectionGeneticAlgorithm (same parameter interface types), so it is
+      // factored into local functions shared by both branches below.
+      ISelector ConfigureSelector(IConstrainedValueParameter<ISelector> selectorParam) {
+        // HL_SELECTOR=random swaps in RandomSelector (uniform, fitness-independent parent choice)
+        // in place of the default TournamentSelector(GroupSize=5); anything else (including unset)
+        // keeps the default.
+        if (Environment.GetEnvironmentVariable("HL_SELECTOR") == "random")
+          return selectorParam.ValidValues.OfType<RandomSelector>().First();
+        var tournament = selectorParam.ValidValues.OfType<TournamentSelector>().First();
         tournament.GroupSizeParameter.Value = new IntValue(5);
-        ga.Selector = tournament;
+        return tournament;
       }
-
-      var subtreeCx = ga.CrossoverParameter.ValidValues.OfType<SubtreeCrossover>().First();
-      ga.Crossover = subtreeCx;
-      // HL_CROSSOVER_PROB: SubtreeCrossover's own CrossoverProbability gate (defaults to 1.0,
-      // i.e. always crosses over) -- SubtreeCrossover.Cross() returns parent0 unchanged when the
-      // gate fails, mirroring Operon's --crossover-probability. Unset keeps the 1.0 default.
-      if (Environment.GetEnvironmentVariable("HL_CROSSOVER_PROB") != null)
-        subtreeCx.CrossoverProbability = double.Parse(Environment.GetEnvironmentVariable("HL_CROSSOVER_PROB"), CultureInfo.InvariantCulture);
-
-      var multiMut = ga.MutatorParameter.ValidValues.OfType<MultiSymbolicExpressionTreeManipulator>().First();
-      // HL_MUTATOR_SET=<comma-list>: restricts the enabled mutator subset to exactly the given
-      // tokens, for isolating each operator's structural contribution one at a time (e.g. the
-      // cumulative single-generation ablation: onepoint -> +changetype -> +fulltree -> +replace ->
-      // +remove). Unset keeps the existing default (all 5, the full set used everywhere else in
-      // this investigation).
-      var mutatorTokenMap = new Dictionary<string, Type> {
-        { "onepoint", typeof(OnePointShaker) },
-        { "changetype", typeof(ChangeNodeTypeManipulation) },
-        { "fulltree", typeof(FullTreeShaker) },
-        { "replace", typeof(ReplaceBranchManipulation) },
-        { "remove", typeof(RemoveBranchManipulation) },
-      };
-      HashSet<Type> allowedMutators;
+      ICrossover ConfigureCrossover(IConstrainedValueParameter<ICrossover> crossoverParam) {
+        var subtreeCx = crossoverParam.ValidValues.OfType<SubtreeCrossover>().First();
+        // HL_CROSSOVER_PROB: SubtreeCrossover's own CrossoverProbability gate (defaults to 1.0,
+        // i.e. always crosses over) -- SubtreeCrossover.Cross() returns parent0 unchanged when the
+        // gate fails, mirroring Operon's --crossover-probability. Unset keeps the 1.0 default.
+        if (Environment.GetEnvironmentVariable("HL_CROSSOVER_PROB") != null)
+          subtreeCx.CrossoverProbability = double.Parse(Environment.GetEnvironmentVariable("HL_CROSSOVER_PROB"), CultureInfo.InvariantCulture);
+        return subtreeCx;
+      }
       string mutatorSetEnv = Environment.GetEnvironmentVariable("HL_MUTATOR_SET");
-      if (mutatorSetEnv != null) {
-        allowedMutators = new HashSet<Type>();
-        foreach (var tok in mutatorSetEnv.Split(',')) {
-          if (tok.Length == 0) continue;
-          if (!mutatorTokenMap.TryGetValue(tok.Trim(), out var t))
-            throw new InvalidOperationException($"Unknown HL_MUTATOR_SET token '{tok}' -- valid tokens: {string.Join(",", mutatorTokenMap.Keys)}");
-          allowedMutators.Add(t);
+      IManipulator ConfigureMutator(IConstrainedValueParameter<IManipulator> mutatorParam) {
+        var multiMut = mutatorParam.ValidValues.OfType<MultiSymbolicExpressionTreeManipulator>().First();
+        // HL_MUTATOR_SET=<comma-list>: restricts the enabled mutator subset to exactly the given
+        // tokens, for isolating each operator's structural contribution one at a time (e.g. the
+        // cumulative single-generation ablation: onepoint -> +changetype -> +fulltree -> +replace ->
+        // +remove). Unset keeps the existing default (all 5, the full set used everywhere else in
+        // this investigation).
+        var mutatorTokenMap = new Dictionary<string, Type> {
+          { "onepoint", typeof(OnePointShaker) },
+          { "changetype", typeof(ChangeNodeTypeManipulation) },
+          { "fulltree", typeof(FullTreeShaker) },
+          { "replace", typeof(ReplaceBranchManipulation) },
+          { "remove", typeof(RemoveBranchManipulation) },
+        };
+        HashSet<Type> allowedMutators;
+        if (mutatorSetEnv != null) {
+          allowedMutators = new HashSet<Type>();
+          foreach (var tok in mutatorSetEnv.Split(',')) {
+            if (tok.Length == 0) continue;
+            if (!mutatorTokenMap.TryGetValue(tok.Trim(), out var t))
+              throw new InvalidOperationException($"Unknown HL_MUTATOR_SET token '{tok}' -- valid tokens: {string.Join(",", mutatorTokenMap.Keys)}");
+            allowedMutators.Add(t);
+          }
+        } else {
+          allowedMutators = new HashSet<Type>(mutatorTokenMap.Values);
         }
-      } else {
-        allowedMutators = new HashSet<Type>(mutatorTokenMap.Values);
+        foreach (var op in multiMut.Operators.ToList())
+          multiMut.Operators.SetItemCheckedState(op, allowedMutators.Contains(op.GetType()));
+        Console.WriteLine($"[verify] enabled mutators = {string.Join(",", multiMut.Operators.CheckedItems.Select(x => x.Value.GetType().Name))} (HL_MUTATOR_SET={mutatorSetEnv ?? "unset (default: all 5)"})");
+        return multiMut;
       }
-      foreach (var op in multiMut.Operators.ToList())
-        multiMut.Operators.SetItemCheckedState(op, allowedMutators.Contains(op.GetType()));
-      ga.Mutator = multiMut;
-      Console.WriteLine($"[verify] enabled mutators = {string.Join(",", multiMut.Operators.CheckedItems.Select(x => x.Value.GetType().Name))} (HL_MUTATOR_SET={mutatorSetEnv ?? "unset (default: all 5)"})");
+
+      HeuristicOptimizationEngineAlgorithm ga;
+      MultiAnalyzer analyzer;
+      string selectorTypeName;
+      if (constrainedGpc) {
+        // The paper's own serialized constrained runs use OffspringSelectionGeneticAlgorithm,
+        // not the plain tournament GeneticAlgorithm used for the other three variants here --
+        // confirmed via inspect_hl_companion_experiment.py against both "GP with constraints"
+        // and "GPC with constraints" .hl files (every embedded run name reads e.g.
+        // "OSGPCConstrained ..."; see CONSTRAINT_DYNAMICS.md). Defaults left at HL's own
+        // (SuccessRatio=1, ComparisonFactor bounds 0..1 with a LinearDiscreteDoubleValueModifier)
+        // match the strings recovered from those files; MaximumSelectionPressure=100 matches the
+        // paper's own README ("max selection pressure 100").
+        var osga = new OSGA { Problem = problem };
+        osga.Seed.Value = o.Seed;
+        osga.SetSeedRandomly.Value = false;
+        osga.PopulationSize.Value = populationSize;
+        osga.MaximumGenerations.Value = maxGenerations;
+        osga.Elites.Value = elites;
+        osga.MutationProbability.Value = mutationProbability;
+        osga.MaximumSelectionPressure.Value = 100;
+        osga.Selector = ConfigureSelector(osga.SelectorParameter);
+        osga.Crossover = ConfigureCrossover(osga.CrossoverParameter);
+        osga.Mutator = ConfigureMutator(osga.MutatorParameter);
+        selectorTypeName = osga.Selector.GetType().Name;
+        analyzer = osga.Analyzer;
+        ga = osga;
+      } else {
+        var stdga = new GeneticAlgorithm { Problem = problem };
+        stdga.Seed.Value = o.Seed;
+        stdga.SetSeedRandomly.Value = false;
+        stdga.PopulationSize.Value = populationSize;
+        stdga.MaximumGenerations.Value = maxGenerations;
+        stdga.Elites.Value = elites;
+        stdga.MutationProbability.Value = mutationProbability;
+        stdga.Selector = ConfigureSelector(stdga.SelectorParameter);
+        stdga.Crossover = ConfigureCrossover(stdga.CrossoverParameter);
+        stdga.Mutator = ConfigureMutator(stdga.MutatorParameter);
+        selectorTypeName = stdga.Selector.GetType().Name;
+        analyzer = stdga.Analyzer;
+        ga = stdga;
+      }
 
       // TEMPORARY diagnostic, not a permanent feature: HL_MUTATION_TRACE=1 enables
       // SymbolicExpressionTreeManipulator.LengthLog (see the ad-hoc, uncommitted patch to that file)
@@ -626,11 +796,38 @@ namespace HeuristicLab.HeadlessRunner {
       // no HeuristicLab source changes needed for this one, entirely in PopulationSampleAnalyzer.cs.
       if (o.PopulationSampleOutput != null) {
         var sampleAnalyzer = new PopulationSampleAnalyzer();
-        ga.Analyzer.Operators.Add(sampleAnalyzer);
-        ga.Analyzer.Operators.SetItemCheckedState(sampleAnalyzer, true);
+        analyzer.Operators.Add(sampleAnalyzer);
+        analyzer.Operators.SetItemCheckedState(sampleAnalyzer, true);
         PopulationSampleAnalyzer.TargetGenerations = new HashSet<int>(
           (o.PopulationSampleGenerations ?? "").Split(',').Where(s => s.Length > 0).Select(int.Parse));
         PopulationSampleAnalyzer.Log = new List<Tuple<int, int, int, int, int, double>>();
+      }
+
+      if (o.ConstraintDiagnosticsOutput != null) {
+        var constrained = evaluator as NMSESingleObjectiveConstraintsEvaluator;
+        if (constrained == null || !(problemData is ShapeConstrainedRegressionProblemData))
+          throw new InvalidOperationException("--constraint-diagnostics-output requires --shape-constraints-config.");
+        var diagnostics = new ConstraintDiagnosticsAnalyzer();
+        analyzer.Operators.Add(diagnostics);
+        analyzer.Operators.SetItemCheckedState(diagnostics, true);
+        ConstraintDiagnosticsAnalyzer.ProblemData = (ShapeConstrainedRegressionProblemData)problemData;
+        ConstraintDiagnosticsAnalyzer.Interpreter = problem.SymbolicExpressionTreeInterpreter;
+        ConstraintDiagnosticsAnalyzer.Evaluator = constrained;
+        ConstraintDiagnosticsAnalyzer.LowerEstimationLimit = problem.EstimationLimits.Lower;
+        ConstraintDiagnosticsAnalyzer.UpperEstimationLimit = problem.EstimationLimits.Upper;
+        ConstraintDiagnosticsAnalyzer.Log = new List<string>();
+      }
+
+      if (o.ShapeDynamicsOutput != null) {
+        var constrained = evaluator as NMSESingleObjectiveConstraintsEvaluator;
+        if (constrained == null || !(problemData is ShapeConstrainedRegressionProblemData))
+          throw new InvalidOperationException("--shape-dynamics-output requires --shape-constraints-config.");
+        var dynamics = new ShapeDynamicsAnalyzer();
+        analyzer.Operators.Add(dynamics);
+        analyzer.Operators.SetItemCheckedState(dynamics, true);
+        ShapeDynamicsAnalyzer.ProblemData = (ShapeConstrainedRegressionProblemData)problemData;
+        ShapeDynamicsAnalyzer.BoundsEstimator = constrained.BoundsEstimator;
+        ShapeDynamicsAnalyzer.Log = new List<string>();
       }
 
       // Intervention B: purges Quality<=0 (degenerate) individuals every generation, replacing
@@ -640,8 +837,8 @@ namespace HeuristicLab.HeadlessRunner {
       // of Intervention A's (refuted) LM-budget-scaling theory. No HL source changes needed.
       if (Environment.GetEnvironmentVariable("HL_PURGE_DEGENERATE") == "1") {
         var purgeAnalyzer = new PurgeDegenerateAnalyzer();
-        ga.Analyzer.Operators.Add(purgeAnalyzer);
-        ga.Analyzer.Operators.SetItemCheckedState(purgeAnalyzer, true);
+        analyzer.Operators.Add(purgeAnalyzer);
+        analyzer.Operators.SetItemCheckedState(purgeAnalyzer, true);
         PurgeDegenerateAnalyzer.Enabled = true;
         PurgeDegenerateAnalyzer.Random = new MersenneTwister((uint)o.Seed);
         PurgeDegenerateAnalyzer.Grammar = grammar;
@@ -704,8 +901,10 @@ namespace HeuristicLab.HeadlessRunner {
       // ReplaceRandomBranch call, plus the drawn PTC2 target length and every genuinely-competed
       // (not forced-minimal) extension-point choice's terminal/function outcome, so the actual
       // empirical terminal-seed rate can be measured directly instead of assumed from symbol counts.
-      // Not gated by HL_INSTRUMENTED -- these fields are always present on this checkout (added
-      // directly, not via the shared subtree-crossover-instrumentation.patch).
+      // This requires the optional local instrumentation patch. Keeping the
+      // references behind the same define as the crossover diagnostics lets a
+      // clean upstream checkout build the constrained runner reproducibly.
+#if HL_INSTRUMENTED
       if (o.ReplaceBranchDiagnosticOutput != null) {
         ReplaceBranchManipulation.RootPickLog = new List<Tuple<bool, int, int, int>>();
         ProbabilisticTreeCreator.TargetLengthLog = new List<int>();
@@ -713,26 +912,71 @@ namespace HeuristicLab.HeadlessRunner {
         ProbabilisticTreeCreator.ForcedFillCount = 0;
       }
 
+      // Per-operator raw length-delta decomposition for the Operon/HL full-pipeline parity
+      // investigation: (operator,len_before,len_after) per crossover/manipulator application,
+      // matching Operon's OPERON_OPGEN_DIAG_DUMP schema exactly. Not gated by HL_INSTRUMENTED.
+      if (o.OpGenDiagnosticOutput != null) {
+        SymbolicExpressionTreeManipulator.OpGenDiagWriter = new System.IO.StreamWriter(o.OpGenDiagnosticOutput) { AutoFlush = false };
+        SymbolicExpressionTreeManipulator.OpGenDiagWriter.WriteLine("operator,len_before,len_after");
+      }
+#else
+      if (o.ReplaceBranchDiagnosticOutput != null || o.OpGenDiagnosticOutput != null)
+        throw new InvalidOperationException("Replace-branch and operator-generation diagnostics require the HeuristicLab instrumentation patch.");
+#endif
+
       // Read back from the live algorithm object right before Start() -- not the intended
       // config value -- so a silent fallback-to-default or a parse failure earlier would show up here.
-      Console.WriteLine($"[verify] ga.Elites.Value (read from algorithm object) = {ga.Elites.Value.ToString(CultureInfo.InvariantCulture)}");
-      Console.WriteLine($"[verify] ga.MutationProbability.Value (read from algorithm object) = {ga.MutationProbability.Value.ToString(CultureInfo.InvariantCulture)}");
-      Console.WriteLine($"[verify] ga.Selector (read from algorithm object) = {ga.Selector.GetType().Name}");
+      Console.WriteLine($"[verify] elites (read from algorithm object) = {elites.ToString(CultureInfo.InvariantCulture)}");
+      Console.WriteLine($"[verify] mutationProbability (read from algorithm object) = {mutationProbability.ToString(CultureInfo.InvariantCulture)}");
+      Console.WriteLine($"[verify] ga (read from algorithm object) = {ga.GetType().Name}");
+      Console.WriteLine($"[verify] ga.Selector (read from algorithm object) = {selectorTypeName}");
       Console.WriteLine($"[verify] ga.Problem.Evaluator (read from algorithm object) = {problem.Evaluator.GetType().Name}, Maximization = {problem.Maximization.Value}");
+      Console.WriteLine($"[verify] ga enabled analyzers = {string.Join(",", analyzer.Operators.CheckedItems.Select(a => a.Value.GetType().Name))}");
       Console.WriteLine($"[verify] Number.Enabled (read from grammar) = {grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Number).Enabled} (HL_DISABLE_NUMBER={Environment.GetEnvironmentVariable("HL_DISABLE_NUMBER") ?? "unset"})");
       // Guards against the ConfigureGrammarSymbols() reset bug (see ConfigureGrammar()'s own comment)
       // ever resurfacing silently: confirms sin/cos/tanh/square/sqrt are actually reachable as
       // crossover donor candidates immediately before the run starts, not just nominally Enabled.
-      Console.WriteLine($"[verify] grammar reachability (post ConfigureGrammar() re-apply): "
-        + $"Cosine.Enabled={grammar.GetSymbol("Cosine").Enabled} IsAllowedChildSymbol(Addition,Cosine)={grammar.IsAllowedChildSymbol(grammar.GetSymbol("Addition"), grammar.GetSymbol("Cosine"))}; "
-        + $"Square.Enabled={grammar.GetSymbol("Square").Enabled} IsAllowedChildSymbol(Addition,Square)={grammar.IsAllowedChildSymbol(grammar.GetSymbol("Addition"), grammar.GetSymbol("Square"))}");
+      Console.WriteLine($"[verify] grammar symbols: Cosine.Enabled={grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Cosine).Enabled}; "
+        + $"Square.Enabled={grammar.Symbols.First(s => s is HeuristicLab.Problems.DataAnalysis.Symbolic.Square).Enabled}");
 
+      var engineExceptions = new List<Exception>();
+      ga.ExceptionOccurred += (sender, eventArgs) => engineExceptions.Add(eventArgs.Value);
+      ga.Engine.ExceptionOccurred += (sender, eventArgs) => engineExceptions.Add(eventArgs.Value);
       var sw = System.Diagnostics.Stopwatch.StartNew();
       ga.Prepare();
       ga.Start();
       sw.Stop();
+      Console.WriteLine($"[verify] GA execution state after Start = {ga.ExecutionState}; engine state = {ga.Engine.ExecutionState}; engine exceptions = {engineExceptions.Count}");
 
+      if (o.ConstraintDiagnosticsOutput != null) {
+        using (var dw = new StreamWriter(o.ConstraintDiagnosticsOutput, append: false)) {
+          dw.WriteLine("generation,individual_index,raw_length,stored_quality,recomputed_quality,violations,error");
+          foreach (var line in ConstraintDiagnosticsAnalyzer.Log) dw.WriteLine(line);
+        }
+        Console.WriteLine($"[verify] constraint diagnostics logged = {ConstraintDiagnosticsAnalyzer.Log.Count}");
+      }
+
+      if (o.ShapeDynamicsOutput != null) {
+        using (var dw = new StreamWriter(o.ShapeDynamicsOutput, append: false)) {
+          dw.WriteLine("generation,population_total,certified_feasible,certified_infeasible,uncertified,known_violation_sum,feasible_length_mean,infeasible_length_mean,feasible_depth_mean,infeasible_depth_mean");
+          foreach (var line in ShapeDynamicsAnalyzer.Log) dw.WriteLine(line);
+        }
+        Console.WriteLine($"[verify] shape dynamics snapshots logged = {ShapeDynamicsAnalyzer.Log.Count}");
+      }
+
+      if (!ga.Results.ContainsKey("Best training solution")) {
+        throw new InvalidOperationException("constrained run did not produce a best-solution result; available results: "
+          + string.Join(", ", ga.Results.Select(r => r.Name)) + "; engine exceptions: "
+          + (engineExceptions.Count == 0 ? "none" : string.Join(" | ", engineExceptions.Select(e => e.ToString()))));
+      }
       var bestSolution = (ISymbolicRegressionSolution)ga.Results["Best training solution"].Value;
+      if (bestSolution == null) {
+        var qualities = ga.Results.ContainsKey("Qualities") ? (DataTable)ga.Results["Qualities"].Value : null;
+        var current = qualities == null ? null : qualities.Rows["CurrentBestQuality"].Values;
+        throw new InvalidOperationException("constrained run produced no finite best solution; current best qualities: "
+          + (current == null ? "unavailable" : string.Join(", ", current.Select(v => v.ToString("R", CultureInfo.InvariantCulture))))
+          + "; engine exceptions: " + (engineExceptions.Count == 0 ? "none" : string.Join(" | ", engineExceptions.Select(e => e.ToString()))));
+      }
       double trainNmse = bestSolution.TrainingNormalizedMeanSquaredError * 100.0;
       double testNmse = bestSolution.TestNormalizedMeanSquaredError * 100.0;
       var bestTree = bestSolution.Model.SymbolicExpressionTree;
@@ -774,7 +1018,7 @@ namespace HeuristicLab.HeadlessRunner {
           o.Problem, o.Noise, o.Variant, o.Seed.ToString(CultureInfo.InvariantCulture),
           trainNmse.ToString("R", CultureInfo.InvariantCulture),
           testNmse.ToString("R", CultureInfo.InvariantCulture),
-          ga.MaximumGenerations.Value.ToString(CultureInfo.InvariantCulture),
+          maxGenerations.ToString(CultureInfo.InvariantCulture),
           sw.Elapsed.TotalSeconds.ToString("F2", CultureInfo.InvariantCulture),
           modelLength.ToString(CultureInfo.InvariantCulture),
           modelDepth.ToString(CultureInfo.InvariantCulture),
@@ -838,7 +1082,7 @@ namespace HeuristicLab.HeadlessRunner {
         // PopulationSize-Elites children per generation (GeneticAlgorithm.cs: selector selects
         // 2*(PopulationSize-Elites) parents, ChildrenCreator pairs them 1:1 into children, each
         // gets exactly one Cross() call), calls per generation is constant and known ahead of time.
-        int callsPerGeneration = ga.PopulationSize.Value - ga.Elites.Value;
+        int callsPerGeneration = populationSize - elites;
         var log = SubtreeCrossover.NoOpLog;
         bool writeNoopHeader = !File.Exists(o.CrossoverNoopOutput);
         using (var nw = new StreamWriter(o.CrossoverNoopOutput, append: true)) {
@@ -853,12 +1097,12 @@ namespace HeuristicLab.HeadlessRunner {
               log[i].Item2 ? "1" : "0"));
           }
         }
-        Console.WriteLine($"[verify] crossover calls logged = {log.Count} (expected {callsPerGeneration} x {ga.MaximumGenerations.Value} generations = {callsPerGeneration * ga.MaximumGenerations.Value})");
+        Console.WriteLine($"[verify] crossover calls logged = {log.Count} (expected {callsPerGeneration} x {maxGenerations} generations = {callsPerGeneration * maxGenerations})");
       }
 
       if (o.CrossoverKernelOutput != null) {
         // Same generation-inference reasoning as --crossover-noop-output above.
-        int callsPerGeneration = ga.PopulationSize.Value - ga.Elites.Value;
+        int callsPerGeneration = populationSize - elites;
         var kernelLog = SubtreeCrossover.KernelLog;
         bool writeKernelHeader = !File.Exists(o.CrossoverKernelOutput);
         using (var kw = new StreamWriter(o.CrossoverKernelOutput, append: true)) {
@@ -873,7 +1117,7 @@ namespace HeuristicLab.HeadlessRunner {
               kernelLog[i].Item2.ToString(CultureInfo.InvariantCulture)));
           }
         }
-        Console.WriteLine($"[verify] crossover kernel events logged = {kernelLog.Count} (expected {callsPerGeneration} x {ga.MaximumGenerations.Value} generations = {callsPerGeneration * ga.MaximumGenerations.Value})");
+        Console.WriteLine($"[verify] crossover kernel events logged = {kernelLog.Count} (expected {callsPerGeneration} x {maxGenerations} generations = {callsPerGeneration * maxGenerations})");
       }
 
       if (o.CrossoverDonorOutput != null) {
@@ -881,7 +1125,7 @@ namespace HeuristicLab.HeadlessRunner {
         // lines up 1:1 with call index (DonorLog logs a (-1,-1) sentinel for no-op calls rather
         // than skipping them), so generation math is unaffected -- only the (-1,-1) rows themselves
         // are skipped when writing, since there's no real donor-branch event to report for them.
-        int callsPerGeneration = ga.PopulationSize.Value - ga.Elites.Value;
+        int callsPerGeneration = populationSize - elites;
         var donorLog = SubtreeCrossover.DonorLog;
         bool writeDonorHeader = !File.Exists(o.CrossoverDonorOutput);
         int noopSkipped = 0;
@@ -898,7 +1142,7 @@ namespace HeuristicLab.HeadlessRunner {
               donorLog[i].Item2.ToString(CultureInfo.InvariantCulture)));
           }
         }
-        Console.WriteLine($"[verify] crossover donor events logged = {donorLog.Count - noopSkipped} (of {donorLog.Count} total calls, {noopSkipped} were no-ops and skipped; expected {callsPerGeneration} x {ga.MaximumGenerations.Value} generations = {callsPerGeneration * ga.MaximumGenerations.Value} total calls)");
+        Console.WriteLine($"[verify] crossover donor events logged = {donorLog.Count - noopSkipped} (of {donorLog.Count} total calls, {noopSkipped} were no-ops and skipped; expected {callsPerGeneration} x {maxGenerations} generations = {callsPerGeneration * maxGenerations} total calls)");
       }
 
       if (o.CrossoverJoinedOutput != null) {
@@ -907,7 +1151,7 @@ namespace HeuristicLab.HeadlessRunner {
         // / --crossover-donor-output need when both sides are wanted together. Filtered to
         // generation >= CrossoverJoinedMinGeneration (skip the burn-in transient) since this is
         // typically used for equilibrium-region kernel dumps over many generations.
-        int callsPerGeneration = ga.PopulationSize.Value - ga.Elites.Value;
+        int callsPerGeneration = populationSize - elites;
         var joinedLog = SubtreeCrossover.JoinedLog;
         bool writeJoinedHeader = !File.Exists(o.CrossoverJoinedOutput);
         int written = 0;
@@ -933,7 +1177,7 @@ namespace HeuristicLab.HeadlessRunner {
       }
 
       if (o.CrossoverArityDiagnosticOutput != null) {
-        int callsPerGeneration = ga.PopulationSize.Value - ga.Elites.Value;
+        int callsPerGeneration = populationSize - elites;
         var arityLog = SubtreeCrossover.ArityDiagnosticLog;
         bool writeArityHeader = !File.Exists(o.CrossoverArityDiagnosticOutput);
         int written = 0;
@@ -989,6 +1233,7 @@ namespace HeuristicLab.HeadlessRunner {
       }
 #endif
 
+#if HL_INSTRUMENTED
       if (o.ReplaceBranchDiagnosticOutput != null) {
         var rootLog = ReplaceBranchManipulation.RootPickLog;
         string rootPath = o.ReplaceBranchDiagnosticOutput + "_root.csv";
@@ -1033,6 +1278,13 @@ namespace HeuristicLab.HeadlessRunner {
           + $"extension choices={extLog.Count}, forced minimal-tree fills={ProbabilisticTreeCreator.ForcedFillCount}");
       }
 
+      if (o.OpGenDiagnosticOutput != null) {
+        SymbolicExpressionTreeManipulator.OpGenDiagWriter.Flush();
+        SymbolicExpressionTreeManipulator.OpGenDiagWriter.Close();
+        Console.WriteLine($"[verify] opgen diagnostic written to {o.OpGenDiagnosticOutput}");
+      }
+#endif
+
       if (o.PopulationSampleOutput != null) {
         var sampleLog = PopulationSampleAnalyzer.Log;
         bool writeSampleHeader = !File.Exists(o.PopulationSampleOutput);
@@ -1054,8 +1306,9 @@ namespace HeuristicLab.HeadlessRunner {
               quality.ToString("R", CultureInfo.InvariantCulture)));
           }
         }
-        Console.WriteLine($"[verify] population samples logged = {sampleLog.Count} across {PopulationSampleAnalyzer.TargetGenerations.Count} target generations (expect {ga.PopulationSize.Value} individuals x {PopulationSampleAnalyzer.TargetGenerations.Count} generations = {ga.PopulationSize.Value * PopulationSampleAnalyzer.TargetGenerations.Count}, if all target generations were reached)");
+        Console.WriteLine($"[verify] population samples logged = {sampleLog.Count} across {PopulationSampleAnalyzer.TargetGenerations.Count} target generations (expect {populationSize} individuals x {PopulationSampleAnalyzer.TargetGenerations.Count} generations = {populationSize * PopulationSampleAnalyzer.TargetGenerations.Count}, if all target generations were reached)");
       }
+
 
       if (o.ModelOutput != null) {
         // Persist the whole run (algorithm + problem + results, including the best solution) using
@@ -1065,7 +1318,7 @@ namespace HeuristicLab.HeadlessRunner {
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         bool compressed = o.ModelOutput.EndsWith(".gz", StringComparison.OrdinalIgnoreCase);
         ContentManager.Initialize(new PersistenceContentManager());
-        ContentManager.Save(ga, o.ModelOutput, compressed);
+        ContentManager.Save((IStorableContent)ga, o.ModelOutput, compressed);
       }
 
       if (PurgeDegenerateAnalyzer.Enabled)

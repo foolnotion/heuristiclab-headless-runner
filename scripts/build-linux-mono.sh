@@ -95,6 +95,7 @@ build_xbuild "HeuristicLab.Problems.DataAnalysis.Symbolic/3.4/HeuristicLab.Probl
 build_xbuild "HeuristicLab.Problems.DataAnalysis.Symbolic.Regression/3.4/HeuristicLab.Problems.DataAnalysis.Symbolic.Regression-3.4.csproj"
 build_xbuild "HeuristicLab.SequentialEngine/3.3/HeuristicLab.SequentialEngine-3.3.csproj"
 build_xbuild "HeuristicLab.Algorithms.GeneticAlgorithm/3.3/HeuristicLab.Algorithms.GeneticAlgorithm-3.3.csproj"
+build_xbuild "HeuristicLab.Algorithms.OffspringSelectionGeneticAlgorithm/3.3/HeuristicLab.Algorithms.OffspringSelectionGeneticAlgorithm-3.3.csproj"
 
 cd "${RUNNER_ROOT}"
 ln -sfn "${HL_ROOT}/bin" bin
