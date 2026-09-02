@@ -5,10 +5,13 @@ reproducing/comparing against [operon](https://github.com/heal-research/operon)
 on the Feynman-comparison experiment (see `foolnotion/operon-publications`,
 `experiments/feynman-comparison/`).
 
-Extracted out of a local `heal-research/HeuristicLab` checkout (where it
-started life as a handful of commits on top of upstream `main`) into its
-own private repo, since it doesn't belong in the upstream HeuristicLab
-project.
+Extracted from a local `heal-research/HeuristicLab` checkout, where it began as a handful of commits on top of upstream `main`. It is maintained separately because it does not belong in the upstream HeuristicLab project.
+
+## Reproducibility boundary
+
+The tracked harness, build definition, and generated Feynman-comparison inputs are public. Build outputs, local `bin` links, and temporary `AssemblyInfo.cs` files are deliberately untracked. This repository does not contain paper-author private data, unpublished author result files, credentials, or a claim that it reproduces the private real-world portion of arXiv:2103.15624.
+
+The supported public scope is the machine-generated Feynman-comparison benchmark. Any paper-replication record must pin this repository revision, the upstream HeuristicLab revision, the input-generation command, the runner command, and a checksummed machine-readable result artifact; it must identify the particular paper rows it tests.
 
 ## Layout
 

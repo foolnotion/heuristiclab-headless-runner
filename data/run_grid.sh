@@ -1,14 +1,21 @@
 #!/bin/bash
 # Parallel grid runner: <problem> x {noise0,noise1} x {GP,GPC} x <seeds>
 # Usage: run_grid.sh <problem> <data_dir> <output_csv> [seeds] [parallelism]
-set -e
+set -euo pipefail
+
 PROBLEM="$1"
 DATA="$2"
 OUT="$3"
 SEEDS="${4:-30}"
 PAR="${5:-16}"
-
-EXE="/c/Users/Bogdan/source/repos/HeuristicLab/HeuristicLab.HeadlessRunner/bin/Release/HeuristicLab.HeadlessRunner.exe"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RUNNER_ROOT="$(cd "${HERE}/.." && pwd)"
+EXE="${HL_RUNNER_EXE:-${RUNNER_ROOT}/HeuristicLab.HeadlessRunner/bin/Release/HeuristicLab.HeadlessRunner.exe}"
+if [ ! -f "${EXE}" ]; then
+  echo "HeuristicLab runner executable not found: ${EXE}" >&2
+  echo "Build it with scripts/build-linux-mono.sh or set HL_RUNNER_EXE." >&2
+  exit 1
+fi
 TMPDIR=$(mktemp -d)
 
 jobs_file="$TMPDIR/jobs.txt"
@@ -24,7 +31,7 @@ done
 run_one() {
   noise="$1"; variant="$2"; seed="$3"
   jobout="$TMPDIR/out_${PROBLEM}_${noise}_${variant}_${seed}.csv"
-  "$EXE" \
+  mono "${EXE}" \
     --train "$DATA/seed${seed}_noise${noise}_train.csv" \
     --test "$DATA/seed${seed}_noise${noise}_test.csv" \
     --target __target__ \
